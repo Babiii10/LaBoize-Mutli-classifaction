@@ -1923,13 +1923,24 @@ modelfunction <- function(learningmodel,
         model<-featureselect$model
         learningmodel<-featureselect$dataset
       }
-      
-      scorelearning =data.frame(model$votes[,lev["positif"]])
-      colnames(scorelearning)<-paste(lev[1],"/",lev[2],sep="")
-      predictclasslearning<-factor(levels = lev) 
-      predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
-      predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
-      predictclasslearning<-as.factor(predictclasslearning)
+
+      # Handle scores for binary and multi-class
+      n_classes <- get_n_classes(learningmodel[,1])
+
+      if(n_classes == 2){
+        # Binary classification - extract probability for positive class
+        scorelearning =data.frame(model$votes[,lev["positif"]])
+        colnames(scorelearning)<-paste(lev[1],"/",lev[2],sep="")
+        predictclasslearning<-factor(levels = lev)
+        predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
+        predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
+        predictclasslearning<-as.factor(predictclasslearning)
+      } else {
+        # Multi-class classification - use probability matrix
+        scorelearning <- model$votes  # Matrix (n_samples x n_classes)
+        # Predict using argmax (no threshold for multi-class)
+        predictclasslearning <- predict_from_scores(scorelearning, learningmodel[,1], threshold=NULL)
+      }
       #predictclasslearning==model$predicted
     }   
     
@@ -2427,9 +2438,16 @@ modelfunction <- function(learningmodel,
     if(modelparameters$modeltype=="xgboost"){
       # XGBoost gradient boosting
       x <- as.matrix(learningmodel[,-1])
-      # IMPORTANT: Encode y so that 1 = lev["positif"] (first level), 0 = lev["negatif"] (second level)
-      # This ensures that predict returns P(lev["positif"])
-      y <- ifelse(learningmodel[,1] == lev["positif"], 1, 0)
+      n_classes <- get_n_classes(learningmodel[,1])
+
+      # Encode y based on binary or multi-class
+      if(n_classes == 2){
+        # Binary: 1 = lev["positif"] (first level), 0 = lev["negatif"] (second level)
+        y <- ifelse(learningmodel[,1] == lev["positif"], 1, 0)
+      } else {
+        # Multi-class: encode as 0, 1, 2, ... (n_classes-1)
+        y <- as.numeric(learningmodel[,1]) - 1
+      }
 
       # Create DMatrix for XGBoost
       dtrain <- xgb.DMatrix(data = x, label = y)
@@ -2477,16 +2495,29 @@ modelfunction <- function(learningmodel,
             cat(sprintf("GridSearchCV best params: nrounds=%d, max_depth=%d, eta=%.3f, gamma=%.3f, score=%.4f\n",
                        optimal_nrounds, optimal_max_depth, optimal_eta, optimal_gamma, grid_result$best_score))
 
-            # Create final parameters list
-            final_params <- list(
-              objective = "binary:logistic",
-              eval_metric = "auc",
-              max_depth = optimal_max_depth,
-              eta = optimal_eta,
-              gamma = optimal_gamma,
-              subsample = optimal_subsample,
-              min_child_weight = optimal_min_child_weight
-            )
+            # Create final parameters list based on binary or multi-class
+            if(n_classes == 2){
+              final_params <- list(
+                objective = "binary:logistic",
+                eval_metric = "auc",
+                max_depth = optimal_max_depth,
+                eta = optimal_eta,
+                gamma = optimal_gamma,
+                subsample = optimal_subsample,
+                min_child_weight = optimal_min_child_weight
+              )
+            } else {
+              final_params <- list(
+                objective = "multi:softprob",
+                num_class = n_classes,
+                eval_metric = "mlogloss",
+                max_depth = optimal_max_depth,
+                eta = optimal_eta,
+                gamma = optimal_gamma,
+                subsample = optimal_subsample,
+                min_child_weight = optimal_min_child_weight
+              )
+            }
 
             # Train final model with optimal parameters
             model <- xgb.train(
@@ -2508,14 +2539,25 @@ modelfunction <- function(learningmodel,
             # Perform hyperparameter tuning using cross-validation
             set.seed(20011203)
 
-            # Parameter grid search
-            best_params <- list(
-              objective = "binary:logistic",
-              eval_metric = "auc",
-              max_depth = 6,
-              eta = 0.3,
-              min_child_weight = 1
-            )
+            # Parameter grid search - adapt to binary or multi-class
+            if(n_classes == 2){
+              best_params <- list(
+                objective = "binary:logistic",
+                eval_metric = "auc",
+                max_depth = 6,
+                eta = 0.3,
+                min_child_weight = 1
+              )
+            } else {
+              best_params <- list(
+                objective = "multi:softprob",
+                num_class = n_classes,
+                eval_metric = "mlogloss",
+                max_depth = 6,
+                eta = 0.3,
+                min_child_weight = 1
+              )
+            }
 
             # Cross-validation to find optimal nrounds
             cv_results <- xgb.cv(
@@ -2548,14 +2590,25 @@ modelfunction <- function(learningmodel,
           # Perform hyperparameter tuning using cross-validation
           set.seed(20011203)
 
-          # Parameter grid search
-          best_params <- list(
-            objective = "binary:logistic",
-            eval_metric = "auc",
-            max_depth = 6,
-            eta = 0.3,
-            min_child_weight = 1
-          )
+          # Parameter grid search - adapt to binary or multi-class
+          if(n_classes == 2){
+            best_params <- list(
+              objective = "binary:logistic",
+              eval_metric = "auc",
+              max_depth = 6,
+              eta = 0.3,
+              min_child_weight = 1
+            )
+          } else {
+            best_params <- list(
+              objective = "multi:softprob",
+              num_class = n_classes,
+              eval_metric = "mlogloss",
+              max_depth = 6,
+              eta = 0.3,
+              min_child_weight = 1
+            )
+          }
 
           # Cross-validation to find optimal nrounds
           cv_results <- xgb.cv(
@@ -2590,13 +2643,25 @@ modelfunction <- function(learningmodel,
         max_depth_param <- ifelse(is.null(modelparameters$max_depth), 6, modelparameters$max_depth)
         eta_param <- ifelse(is.null(modelparameters$eta), 0.3, modelparameters$eta)
 
-        params <- list(
-          objective = "binary:logistic",
-          eval_metric = "auc",
-          max_depth = max_depth_param,
-          eta = eta_param,
-          min_child_weight = 1
-        )
+        # Adapt params to binary or multi-class
+        if(n_classes == 2){
+          params <- list(
+            objective = "binary:logistic",
+            eval_metric = "auc",
+            max_depth = max_depth_param,
+            eta = eta_param,
+            min_child_weight = 1
+          )
+        } else {
+          params <- list(
+            objective = "multi:softprob",
+            num_class = n_classes,
+            eval_metric = "mlogloss",
+            max_depth = max_depth_param,
+            eta = eta_param,
+            min_child_weight = 1
+          )
+        }
 
         model <- xgb.train(
           params = params,
@@ -2612,15 +2677,25 @@ modelfunction <- function(learningmodel,
         model$optimal_min_child_weight <- 1
       }
 
-      # Make predictions (probabilities)
-      scorelearning <- xgboost:::predict.xgb.Booster(model, x)
-      scorelearning <- data.frame(scorelearning)
-      colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
+      # Make predictions (probabilities) - adapt to binary or multi-class
+      predictions_raw <- xgboost:::predict.xgb.Booster(model, x)
 
-      predictclasslearning<-factor(levels = lev)
-      predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
-      predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
-      predictclasslearning<-as.factor(predictclasslearning)
+      if(n_classes == 2){
+        # Binary: predictions_raw is a vector of probabilities for positive class
+        scorelearning <- data.frame(predictions_raw)
+        colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
+        predictclasslearning<-factor(levels = lev)
+        predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
+        predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
+        predictclasslearning<-as.factor(predictclasslearning)
+      } else {
+        # Multi-class: predictions_raw is a matrix (n_samples × n_classes)
+        # reshape=TRUE ensures we get a matrix (nrows × nclasses)
+        scorelearning <- matrix(predictions_raw, ncol=n_classes, byrow=TRUE)
+        colnames(scorelearning) <- lev
+        # Predict using argmax (no threshold for multi-class)
+        predictclasslearning <- predict_from_scores(scorelearning, learningmodel[,1], threshold=NULL)
+      }
     }
 
     #levels(predictclassval)<-paste("test",levels(predictclasslearning),sep="")
