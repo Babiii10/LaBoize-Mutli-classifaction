@@ -60,6 +60,63 @@ predict_from_scores <- function(scores, group_factor){
   return(as.factor(predicted))
 }
 
+# Calculate multi-class AUC (Area Under the Curve)
+# Uses One-vs-Rest approach for multi-class problems
+# Returns both overall multi-class AUC and per-class AUC values
+calculate_multiclass_auc <- function(true_labels, probability_matrix){
+  # true_labels: factor with true class labels
+  # probability_matrix: matrix (n_samples × n_classes) with predicted probabilities
+
+  if(!is.factor(true_labels)){
+    true_labels <- as.factor(true_labels)
+  }
+
+  if(!is.matrix(probability_matrix)){
+    stop("probability_matrix must be a matrix (n_samples × n_classes)")
+  }
+
+  lev <- levels(true_labels)
+  n_classes <- length(lev)
+
+  # Calculate per-class AUC using One-vs-Rest approach
+  auc_per_class <- numeric(n_classes)
+  names(auc_per_class) <- lev
+
+  for(i in 1:n_classes){
+    # Create binary indicator: 1 if this class, 0 otherwise
+    binary_response <- ifelse(true_labels == lev[i], 1, 0)
+
+    # Get probabilities for this class
+    class_probs <- probability_matrix[, i]
+
+    # Calculate ROC and AUC
+    tryCatch({
+      roc_obj <- roc(binary_response, class_probs, quiet=TRUE)
+      auc_per_class[i] <- as.numeric(auc(roc_obj))
+    }, error = function(e){
+      auc_per_class[i] <- NA
+    })
+  }
+
+  # Calculate overall multi-class AUC using pROC's multiclass.roc
+  overall_auc <- tryCatch({
+    roc_obj <- multiclass.roc(true_labels, probability_matrix, quiet=TRUE)
+    as.numeric(auc(roc_obj))
+  }, error = function(e){
+    return(NA)
+  })
+
+  # Calculate mean of per-class AUCs (macro-average)
+  mean_auc <- mean(auc_per_class, na.rm=TRUE)
+
+  return(list(
+    overall_auc = overall_auc,      # Multi-class AUC (pROC method)
+    mean_auc = mean_auc,             # Mean of One-vs-Rest AUCs
+    auc_per_class = auc_per_class,   # AUC for each class (One-vs-Rest)
+    n_classes = n_classes
+  ))
+}
+
 ##########################
 importfile<-function (datapath,extension,NAstring="NA",sheet=1,skiplines=0,dec=".",sep=","){
   # datapath: path of the file
@@ -2564,16 +2621,20 @@ modelfunction <- function(learningmodel,
       # Create resvalidationmodel with all probability columns
       resvalidationmodel <- data.frame(classval, scoreval, predictclassval, check.names=FALSE)
 
-      # Calculate multi-class AUC
-      auc <- tryCatch({
-        roc_obj <- multiclass.roc(classval, scoreval, quiet=TRUE)
-        as.numeric(auc(roc_obj))
-      }, error = function(e) {
-        # Fallback if multiclass.roc fails
-        return(NA)
-      })
+      # Calculate multi-class AUC using dedicated function
+      auc_results <- calculate_multiclass_auc(classval, scoreval)
 
-      datavalidationmodel<-list("validationdiff"=validationdiff,"validationmodel"=validationmodel,"resvalidationmodel"=resvalidationmodel,"auc"=auc)
+      # For backward compatibility, store overall_auc as 'auc'
+      auc <- auc_results$overall_auc
+
+      datavalidationmodel<-list(
+        "validationdiff"=validationdiff,
+        "validationmodel"=validationmodel,
+        "resvalidationmodel"=resvalidationmodel,
+        "auc"=auc,
+        "auc_per_class"=auc_results$auc_per_class,  # AUC for each class (One-vs-Rest)
+        "mean_auc"=auc_results$mean_auc              # Mean of per-class AUCs
+      )
       
     }
     else{datavalidationmodel<-list()}
@@ -2664,46 +2725,77 @@ ROCcurve<-function(validation,decisionvalues,maintitle="Roc curve",graph=T,ggplo
   }
 
   if(ggplot){
-    # Plot One-vs-Rest ROC curves
-    col <- gg_color_hue(n_classes + 1)
+    # Plot One-vs-Rest ROC curves with improved visualization
     bin = 0.01
     diag = data.frame(x = seq(0, 1, by = bin), y = rev(seq(0, 1, by = bin)))
 
-    # Create plot
-    p <- ggplot() +
-      geom_line(data = diag, aes(x = x, y = y), color = col[n_classes + 1], linetype="dashed")
+    # Prepare data for all ROC curves
+    all_roc_data <- data.frame()
+    class_labels <- character()
 
-    # Add ROC curve for each class
     for(i in 1:length(roc_list)){
       class_name <- names(roc_list)[i]
       roc_obj <- roc_list[[class_name]]
+      auc_val <- auc_values[i]
 
       y <- rev(roc_obj$sensitivities)
       x <- rev(roc_obj$specificities)
-      roc_df <- data.frame(x=x, y=y, class=class_name)
 
-      p <- p +
-        geom_line(data = roc_df, aes(x = x, y = y, color = class), size=1)
+      # Create label with class name and AUC
+      label_with_auc <- sprintf("%s (AUC=%.3f)", class_name, auc_val)
+      class_labels <- c(class_labels, label_with_auc)
+
+      roc_df <- data.frame(
+        x = x,
+        y = y,
+        class = label_with_auc,
+        class_order = i
+      )
+      all_roc_data <- rbind(all_roc_data, roc_df)
     }
 
-    # Add AUC annotations
-    auc_text <- paste0(names(roc_list), ": ", round(auc_values, 3), collapse="\n")
-    mean_auc_text <- paste0("Mean AUC: ", round(mean_auc, 3))
+    # Set factor levels to preserve order in legend
+    all_roc_data$class <- factor(all_roc_data$class, levels = class_labels)
 
-    f <- p +
-      theme(axis.text = element_text(size = 16),
-            title = element_text(size = 15),
-            axis.text.x = element_text(size = 12, face = 'bold'),
-            axis.text.y = element_text(size = 12, face = 'bold'),
-            axis.title.x = element_text(size = 15, face = 'bold'),
-            axis.title.y = element_text(size = 15, face = 'bold'),
-            legend.position = "right") +
-      labs(y = "Sensitivity (TPR)", x = "1 - Specificity (FPR)",
-           title = maintitle, color = "Class") +
-      annotate("text", x=0.3, y=0.1, label=mean_auc_text, size=5, fontface="bold") +
-      scale_x_reverse()
+    # Create plot with all curves
+    p <- ggplot() +
+      # Diagonal reference line
+      geom_line(data = diag, aes(x = x, y = y),
+                color = "gray50", linetype = "dashed", size = 0.8) +
+      # ROC curves for each class
+      geom_line(data = all_roc_data,
+                aes(x = x, y = y, color = class),
+                size = 1.2) +
+      # Theme and labels
+      theme_minimal() +
+      theme(
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16, face = 'bold'),
+        plot.title = element_text(size = 17, face = 'bold', hjust = 0.5),
+        legend.title = element_text(size = 14, face = 'bold'),
+        legend.text = element_text(size = 12),
+        legend.position = "right",
+        panel.grid.minor = element_blank()
+      ) +
+      labs(
+        x = "1 - Specificity (FPR)",
+        y = "Sensitivity (TPR)",
+        title = paste0(maintitle, "\n(One-vs-Rest Approach)"),
+        color = "Class (AUC)"
+      ) +
+      scale_x_reverse() +
+      scale_y_continuous(breaks = seq(0, 1, 0.2)) +
+      coord_cartesian(xlim = c(1, 0), ylim = c(0, 1))
 
-    f
+    # Add mean AUC annotation
+    mean_auc_text <- sprintf("Mean AUC: %.3f", mean_auc)
+    p <- p +
+      annotate("text", x = 0.7, y = 0.15,
+               label = mean_auc_text,
+               size = 5, fontface = "bold",
+               color = "darkblue")
+
+    return(p)
   }
 }
 
