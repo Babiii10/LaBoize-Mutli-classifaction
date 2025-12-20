@@ -45,121 +45,53 @@ usePackage("class")#for k-nearest neighbors
 # Multi-class Classification Helper Functions
 ##########################
 
-# Detect if classification is binary or multi-class
-is_multiclass <- function(group_factor){
-  return(length(levels(group_factor)) > 2)
-}
-
 # Get number of classes
 get_n_classes <- function(group_factor){
   return(length(levels(group_factor)))
 }
 
-# Convert scores/probabilities for multi-class
-# For binary: returns vector
-# For multi-class: returns matrix (n_samples x n_classes)
-process_multiclass_scores <- function(scores, group_factor, model_votes=NULL){
-  n_classes <- get_n_classes(group_factor)
-
-  if(n_classes == 2){
-    # Binary classification - return vector
-    if(!is.null(model_votes)){
-      # For Random Forest
-      lev <- levels(group_factor)
-      names(lev) <- c("positif", "negatif")
-      return(model_votes[, lev["positif"]])
-    }
-    return(as.vector(scores))
-  } else {
-    # Multi-class - return matrix
-    if(!is.null(model_votes)){
-      # For Random Forest - votes is already a matrix
-      return(model_votes)
-    }
-    if(is.matrix(scores)){
-      return(scores)
-    }
-    # If scores is a vector, we can't properly handle multi-class
-    warning("Multi-class classification requires probability matrix, got vector")
-    return(scores)
+# Predict class labels from probability matrix using argmax
+# Works for any number of classes (including 2)
+predict_from_scores <- function(scores, group_factor){
+  # scores must be a matrix (n_samples × n_classes)
+  if(!is.matrix(scores)){
+    stop("predict_from_scores expects a probability matrix (n_samples × n_classes)")
   }
-}
 
-# Predict class labels from scores
-# For binary: uses threshold
-# For multi-class: uses argmax
-predict_from_scores <- function(scores, group_factor, threshold=0.5){
-  n_classes <- get_n_classes(group_factor)
   lev <- levels(group_factor)
-
-  if(n_classes == 2){
-    # Binary classification - use threshold
-    names(lev) <- c("positif", "negatif")
-    predicted <- factor(levels = lev)
-    predicted[which(scores >= threshold)] <- lev["positif"]
-    predicted[which(scores < threshold)] <- lev["negatif"]
-    return(as.factor(predicted))
-  } else {
-    # Multi-class - use argmax
-    if(!is.matrix(scores)){
-      warning("Multi-class prediction requires probability matrix")
-      return(NULL)
-    }
-    # Get class with maximum probability for each sample
-    predicted_idx <- apply(scores, 1, which.max)
-    predicted <- lev[predicted_idx]
-    return(as.factor(predicted))
-  }
+  # Get class with maximum probability for each sample
+  predicted_idx <- apply(scores, 1, which.max)
+  predicted <- lev[predicted_idx]
+  return(as.factor(predicted))
 }
 
-# Calculate confusion matrix metrics
-# For binary: sensitivity, specificity
-# For multi-class: per-class metrics
+# Calculate confusion matrix metrics for multi-class (works for 2+ classes)
 calculate_classification_metrics <- function(true_labels, predicted_labels){
   conf_matrix <- table(Predicted = predicted_labels, Actual = true_labels)
   n_classes <- length(unique(true_labels))
 
-  if(n_classes == 2){
-    # Binary classification metrics
-    TP <- conf_matrix[2, 2]
-    TN <- conf_matrix[1, 1]
-    FP <- conf_matrix[2, 1]
-    FN <- conf_matrix[1, 2]
+  # Sensitivity = Recall = TP / (TP + FN) for each class
+  sensitivity_per_class <- diag(conf_matrix) / rowSums(conf_matrix)
 
-    sensitivity <- TP / (TP + FN)
-    specificity <- TN / (TN + FP)
-    accuracy <- (TP + TN) / sum(conf_matrix)
+  # Precision = TP / (TP + FP) for each class
+  precision_per_class <- diag(conf_matrix) / colSums(conf_matrix)
 
-    return(list(
-      confusion_matrix = conf_matrix,
-      sensitivity = sensitivity,
-      specificity = specificity,
-      accuracy = accuracy
-    ))
-  } else {
-    # Multi-class metrics (per-class)
-    # Sensitivity = Recall = TP / (TP + FN) for each class
-    sensitivity_per_class <- diag(conf_matrix) / rowSums(conf_matrix)
+  # Overall accuracy
+  accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
 
-    # Precision = TP / (TP + FP) for each class
-    precision_per_class <- diag(conf_matrix) / colSums(conf_matrix)
+  # Macro-averaged metrics
+  macro_sensitivity <- mean(sensitivity_per_class, na.rm=TRUE)
+  macro_precision <- mean(precision_per_class, na.rm=TRUE)
 
-    # Overall accuracy
-    accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
-
-    # Macro-averaged metrics
-    macro_sensitivity <- mean(sensitivity_per_class, na.rm=TRUE)
-    macro_precision <- mean(precision_per_class, na.rm=TRUE)
-
-    return(list(
-      confusion_matrix = conf_matrix,
-      sensitivity_per_class = sensitivity_per_class,
-      precision_per_class = precision_per_class,
-      macro_sensitivity = macro_sensitivity,
-      macro_precision = macro_precision,
-      accuracy = accuracy
-    ))
-  }
+  return(list(
+    confusion_matrix = conf_matrix,
+    sensitivity_per_class = sensitivity_per_class,
+    precision_per_class = precision_per_class,
+    macro_sensitivity = macro_sensitivity,
+    macro_precision = macro_precision,
+    accuracy = accuracy,
+    n_classes = n_classes
+  ))
 }
 
 ##########################
@@ -829,116 +761,77 @@ diffexptest<-function(toto,test="Wtest"){
   #test= Ttest: Student test (parametric), Wtest: Wilcoxon (nonparametric)
   #      Kruskal: Kruskal-Wallis (multi-class nonparametric), ANOVA: ANOVA (multi-class parametric)
 
+  # Multi-class statistical testing (works for 2+ classes)
   group<-toto[,1]
   toto<-toto[,-1]
   n_classes <- length(levels(group))
 
-  # Detect if binary or multi-class
-  if(n_classes == 2){
-    # BINARY CLASSIFICATION - Original code
-    pval<-vector()
-    adjustpval<-vector()
-    mlev1<-vector()
-    namelev1<-levels(group)[1]
-    mlev2<-vector()
-    namelev2<-levels(group)[2]
-    FC1o2<-vector()
-    FC2o1<-vector()
-    auc<-vector()
-    resyounden<-matrix(ncol = 4,nrow = ncol(toto))
-    for (i in 1:max(1,ncol(toto)) ){
-      lev1<-toto[which(group==namelev1),i]
-      lev2<-toto[which(group==namelev2),i]
-      mlev1[i]<-mean(lev1,na.rm = T)+0.0001
-      mlev2[i]<-mean(lev2,na.rm = T)+0.0001
+  pval<-vector()
+  adjustpval<-vector()
 
-      FC1o2[i]<-mlev1[i]/mlev2[i]
-      FC2o1[i]<-mlev2[i]/mlev1[i]
-      auc[i]<-auc(roc(group,toto[,i],quiet=TRUE))
-      resyounden[i,]<-younden(response = group,predictor = toto[,i])
-      if( test=="Ttest"){pval[i]<-t.test(x = lev1,y = lev2)$p.value}
-      else if( test=="Wtest"){pval[i]<-wilcox.test(lev1 ,lev2,exact = F)$p.value }
-    }
-    pval[which(is.na(pval))]<-1
-    adjustpval<-p.adjust(pval, method = "BH")
-    logFC1o2<-log2(abs(FC1o2))
-    logFC2o1<-log2(abs(FC2o1))
+  # Calculate mean for each class
+  means_by_class <- matrix(nrow = ncol(toto), ncol = n_classes)
+  colnames_means <- paste("mean", levels(group), sep = "_")
 
-    listgen<-data.frame(colnames(toto),pval,adjustpval,auc,FC1o2,logFC1o2,FC2o1,logFC2o1,mlev1,mlev2,resyounden)
-    colnames(listgen)<-c("name",paste("pval",test,sep = ""),paste("BHadjustpval",test,sep = ""),"AUC",paste("FoldChange ",namelev1,"/",namelev2,sep = ""),paste("logFoldChange ",namelev1,"/",namelev2,sep = ""),
-                         paste("FoldChange ",namelev2,"/",namelev1,sep = ""),paste("logFoldChange ",namelev2,"/",namelev1,sep = ""),paste("mean",namelev1,sep = ""),paste("mean",namelev2,sep = ""),
-                         "younden criterion","sensibility younden","specificity younden","threshold younden")
-    return(listgen)
+  # Calculate overall mean
+  mean_overall <- vector()
 
-  } else {
-    # MULTI-CLASS CLASSIFICATION - New implementation
-    pval<-vector()
-    adjustpval<-vector()
+  # Multi-class AUC (one-vs-rest average)
+  auc_multiclass <- vector()
 
-    # Calculate mean for each class
-    means_by_class <- matrix(nrow = ncol(toto), ncol = n_classes)
-    colnames_means <- paste("mean", levels(group), sep = "_")
-
-    # Calculate overall mean for fold change reference
-    mean_overall <- vector()
-
-    # For multi-class, use multiclass.roc from pROC
-    auc_multiclass <- vector()
-
-    for (i in 1:max(1,ncol(toto)) ){
-      # Statistical test
-      if(test == "Kruskal" || test == "Wtest"){
-        # Kruskal-Wallis test (non-parametric for multiple groups)
-        pval[i] <- tryCatch({
-          kruskal.test(toto[,i] ~ group)$p.value
-        }, error = function(e) return(1))
-      } else if(test == "ANOVA" || test == "Ttest"){
-        # ANOVA (parametric for multiple groups)
-        pval[i] <- tryCatch({
-          summary(aov(toto[,i] ~ group))[[1]][1,"Pr(>F)"]
-        }, error = function(e) return(1))
-      }
-
-      # Calculate means for each class
-      for(j in 1:n_classes){
-        class_data <- toto[which(group == levels(group)[j]), i]
-        means_by_class[i, j] <- mean(class_data, na.rm = TRUE) + 0.0001
-      }
-
-      # Overall mean for reference
-      mean_overall[i] <- mean(toto[,i], na.rm = TRUE) + 0.0001
-
-      # Multi-class AUC (one-vs-rest average)
-      auc_multiclass[i] <- tryCatch({
-        roc_obj <- multiclass.roc(group, toto[,i], quiet=TRUE)
-        as.numeric(auc(roc_obj))
-      }, error = function(e) return(0.5))
+  for (i in 1:max(1,ncol(toto)) ){
+    # Statistical test
+    if(test == "Kruskal" || test == "Wtest"){
+      # Kruskal-Wallis test (non-parametric)
+      pval[i] <- tryCatch({
+        kruskal.test(toto[,i] ~ group)$p.value
+      }, error = function(e) return(1))
+    } else if(test == "ANOVA" || test == "Ttest"){
+      # ANOVA (parametric)
+      pval[i] <- tryCatch({
+        summary(aov(toto[,i] ~ group))[[1]][1,"Pr(>F)"]
+      }, error = function(e) return(1))
     }
 
-    pval[which(is.na(pval))]<-1
-    adjustpval<-p.adjust(pval, method = "BH")
-
-    # Build result dataframe for multi-class
-    listgen <- data.frame(
-      name = colnames(toto),
-      pval = pval,
-      adjustpval = adjustpval,
-      auc = auc_multiclass,
-      mean_overall = mean_overall
-    )
-
-    # Add means for each class
+    # Calculate means for each class
     for(j in 1:n_classes){
-      listgen[, paste("mean", levels(group)[j], sep = "_")] <- means_by_class[, j]
+      class_data <- toto[which(group == levels(group)[j]), i]
+      means_by_class[i, j] <- mean(class_data, na.rm = TRUE) + 0.0001
     }
 
-    # Rename columns
-    colnames(listgen)[2] <- paste("pval", test, sep = "")
-    colnames(listgen)[3] <- paste("BHadjustpval", test, sep = "")
-    colnames(listgen)[4] <- "AUC_multiclass"
+    # Overall mean
+    mean_overall[i] <- mean(toto[,i], na.rm = TRUE) + 0.0001
 
-    return(listgen)
+    # Multi-class AUC (one-vs-rest average)
+    auc_multiclass[i] <- tryCatch({
+      roc_obj <- multiclass.roc(group, toto[,i], quiet=TRUE)
+      as.numeric(auc(roc_obj))
+    }, error = function(e) return(0.5))
   }
+
+  pval[which(is.na(pval))]<-1
+  adjustpval<-p.adjust(pval, method = "BH")
+
+  # Build result dataframe
+  listgen <- data.frame(
+    name = colnames(toto),
+    pval = pval,
+    adjustpval = adjustpval,
+    auc = auc_multiclass,
+    mean_overall = mean_overall
+  )
+
+  # Add means for each class
+  for(j in 1:n_classes){
+    listgen[, paste("mean", levels(group)[j], sep = "_")] <- means_by_class[, j]
+  }
+
+  # Rename columns
+  colnames(listgen)[2] <- paste("pval", test, sep = "")
+  colnames(listgen)[3] <- paste("BHadjustpval", test, sep = "")
+  colnames(listgen)[4] <- "AUC_multiclass"
+
+  return(listgen)
 }
 
 younden<-function(response,predictor){
