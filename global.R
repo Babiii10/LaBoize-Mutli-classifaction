@@ -3041,14 +3041,107 @@ nll<-function(element){
   else{return(element)}
 }
 
-sensibility<-function(predict,class){
-data<-table(predict,class)
-sensi<-round(data[1,1]/(data[1,1]+data[2,1]),digits = 3)
-return(sensi)
+# Calculate sensitivity (recall) for multi-class classification
+# Works for 2+ classes using One-vs-Rest approach
+sensibility <- function(predict, class){
+  # Ensure both are factors with same levels
+  if(!is.factor(class)) class <- as.factor(class)
+  if(!is.factor(predict)) predict <- as.factor(predict)
+
+  # Get confusion matrix
+  conf_matrix <- table(Predicted = predict, Actual = class)
+
+  # Get class levels
+  lev <- levels(class)
+  n_classes <- length(lev)
+
+  # Calculate sensitivity per class (One-vs-Rest)
+  # Sensitivity = TP / (TP + FN) = Recall
+  sensitivity_per_class <- numeric(n_classes)
+  names(sensitivity_per_class) <- lev
+
+  for(i in 1:n_classes){
+    class_name <- lev[i]
+
+    # True Positives: correctly predicted as this class
+    TP <- conf_matrix[class_name, class_name]
+
+    # False Negatives: actually this class but predicted as another
+    FN <- sum(conf_matrix[, class_name]) - TP
+
+    # Sensitivity for this class
+    if((TP + FN) > 0){
+      sensitivity_per_class[i] <- TP / (TP + FN)
+    } else {
+      sensitivity_per_class[i] <- NA
+    }
+  }
+
+  # Calculate macro-average (mean of per-class sensitivities)
+  macro_sensitivity <- mean(sensitivity_per_class, na.rm = TRUE)
+
+  # Round results
+  sensitivity_per_class <- round(sensitivity_per_class, digits = 3)
+  macro_sensitivity <- round(macro_sensitivity, digits = 3)
+
+  # Return results
+  return(list(
+    per_class = sensitivity_per_class,
+    macro_average = macro_sensitivity,
+    n_classes = n_classes
+  ))
 }
-specificity<-function(predict,class){
-  data<-table(predict,class )
-  round(data[2,2]/(data[1,2]+data[2,2]),digit=3)
+
+# Calculate specificity for multi-class classification
+# Works for 2+ classes using One-vs-Rest approach
+specificity <- function(predict, class){
+  # Ensure both are factors with same levels
+  if(!is.factor(class)) class <- as.factor(class)
+  if(!is.factor(predict)) predict <- as.factor(predict)
+
+  # Get confusion matrix
+  conf_matrix <- table(Predicted = predict, Actual = class)
+
+  # Get class levels
+  lev <- levels(class)
+  n_classes <- length(lev)
+
+  # Calculate specificity per class (One-vs-Rest)
+  # Specificity = TN / (TN + FP)
+  specificity_per_class <- numeric(n_classes)
+  names(specificity_per_class) <- lev
+
+  for(i in 1:n_classes){
+    class_name <- lev[i]
+
+    # True Negatives: correctly predicted as NOT this class
+    # Sum of all cells except the row and column of this class
+    TN <- sum(conf_matrix) - sum(conf_matrix[class_name, ]) - sum(conf_matrix[, class_name]) + conf_matrix[class_name, class_name]
+
+    # False Positives: predicted as this class but actually another
+    FP <- sum(conf_matrix[class_name, ]) - conf_matrix[class_name, class_name]
+
+    # Specificity for this class
+    if((TN + FP) > 0){
+      specificity_per_class[i] <- TN / (TN + FP)
+    } else {
+      specificity_per_class[i] <- NA
+    }
+  }
+
+  # Calculate macro-average (mean of per-class specificities)
+  macro_specificity <- mean(specificity_per_class, na.rm = TRUE)
+
+  # Round results
+  specificity_per_class <- round(specificity_per_class, digits = 3)
+  macro_specificity <- round(macro_specificity, digits = 3)
+
+  # Return results
+  return(list(
+    per_class = specificity_per_class,
+    macro_average = macro_specificity,
+    n_classes = n_classes
+  ))
 }
 
 # cette fonction construit un tableau de parametres a tester a partir d'une liste de parametres

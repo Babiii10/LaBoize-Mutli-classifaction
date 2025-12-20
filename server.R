@@ -314,6 +314,36 @@ shinyServer(function(input, output,session) {
     content = function(file) {
       downloaddataset(   DATA()$VALIDATION, file) })
 
+  # Display class summary
+  output$class_summary <- renderText({
+    learning <- DATA()$LEARNING
+    validate(need(!is.null(learning), "No data loaded"))
+    class_levels <- levels(learning[,1])
+    paste(class_levels, collapse = ", ")
+  })
+
+  # Display class count indicator
+  output$class_count_indicator <- renderUI({
+    learning <- DATA()$LEARNING
+    validate(need(!is.null(learning), "No data loaded"))
+    n_classes <- length(levels(learning[,1]))
+
+    # Create badge with appropriate color
+    badge_color <- if(n_classes == 2) {
+      "#17a2b8"  # Blue for binary
+    } else if(n_classes == 3) {
+      "#ffc107"  # Yellow for 3 classes
+    } else {
+      "#28a745"  # Green for 4+ classes
+    }
+
+    tags$div(
+      id = "class_count_indicator",
+      style = sprintf("color: white; background-color: %s; padding: 10px; border-radius: 5px; text-align: center; font-weight: bold;", badge_color),
+      sprintf("📊 %d classe%s détectée%s (multi-classe)", n_classes, if(n_classes > 1) "s" else "", if(n_classes > 1) "s" else "")
+    )
+  })
+
 
 #################
 SELECTDATA<-reactive({
@@ -324,8 +354,9 @@ SELECTDATA<-reactive({
            need(input$thresholdNAstructure>0,input$thresholdNAstructure<1,"threshold of the pvalue has to be between 0 and 1"))
   learning<<-DATA()$LEARNING
   validate(need(input$confirmdatabutton!=0,"Importation of datas has to be confirmed"))
-  
-  validate(need(length(levels(learning[,1]))==2,"number of groups is not equal to 2"))
+
+  # Multi-class: accept 2 or more classes
+  validate(need(length(levels(learning[,1])) >= 2, "Number of classes must be at least 2"))
   resselectdata<<-selectdatafunction(learning = learning,selectdataparameters = selectdataparameters)
   list(LEARNINGSELECT=resselectdata$learningselect,STRUCTUREDFEATURES=resselectdata$structuredfeatures,DATASTRUCTUREDFEATURES=resselectdata$datastructuredfeatures,selectdataparameters)
 })
