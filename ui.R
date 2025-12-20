@@ -108,7 +108,10 @@ shinyUI(fluidPage(
                            column(12,
                                   h4("Classes in dataset:"),
                                   textOutput("class_summary"),
-                                  tags$head(tags$style("#class_summary{color: #007bff;font-size: 16px;font-weight: bold;}"))
+                                  tags$head(tags$style("#class_summary{color: #007bff;font-size: 16px;font-weight: bold;}")),
+                                  br(),
+                                  uiOutput("class_count_indicator"),
+                                  tags$head(tags$style("#class_count_indicator{color: #28a745;font-size: 15px;font-weight: bold;background-color: #f0f9ff;padding: 8px;border-radius: 5px;border-left: 4px solid #28a745;}"))
                            )
                          ),
                          hr(),
