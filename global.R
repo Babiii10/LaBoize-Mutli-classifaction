@@ -42,6 +42,127 @@ usePackage("class")#for k-nearest neighbors
 
 
 ##########################
+# Multi-class Classification Helper Functions
+##########################
+
+# Detect if classification is binary or multi-class
+is_multiclass <- function(group_factor){
+  return(length(levels(group_factor)) > 2)
+}
+
+# Get number of classes
+get_n_classes <- function(group_factor){
+  return(length(levels(group_factor)))
+}
+
+# Convert scores/probabilities for multi-class
+# For binary: returns vector
+# For multi-class: returns matrix (n_samples x n_classes)
+process_multiclass_scores <- function(scores, group_factor, model_votes=NULL){
+  n_classes <- get_n_classes(group_factor)
+
+  if(n_classes == 2){
+    # Binary classification - return vector
+    if(!is.null(model_votes)){
+      # For Random Forest
+      lev <- levels(group_factor)
+      names(lev) <- c("positif", "negatif")
+      return(model_votes[, lev["positif"]])
+    }
+    return(as.vector(scores))
+  } else {
+    # Multi-class - return matrix
+    if(!is.null(model_votes)){
+      # For Random Forest - votes is already a matrix
+      return(model_votes)
+    }
+    if(is.matrix(scores)){
+      return(scores)
+    }
+    # If scores is a vector, we can't properly handle multi-class
+    warning("Multi-class classification requires probability matrix, got vector")
+    return(scores)
+  }
+}
+
+# Predict class labels from scores
+# For binary: uses threshold
+# For multi-class: uses argmax
+predict_from_scores <- function(scores, group_factor, threshold=0.5){
+  n_classes <- get_n_classes(group_factor)
+  lev <- levels(group_factor)
+
+  if(n_classes == 2){
+    # Binary classification - use threshold
+    names(lev) <- c("positif", "negatif")
+    predicted <- factor(levels = lev)
+    predicted[which(scores >= threshold)] <- lev["positif"]
+    predicted[which(scores < threshold)] <- lev["negatif"]
+    return(as.factor(predicted))
+  } else {
+    # Multi-class - use argmax
+    if(!is.matrix(scores)){
+      warning("Multi-class prediction requires probability matrix")
+      return(NULL)
+    }
+    # Get class with maximum probability for each sample
+    predicted_idx <- apply(scores, 1, which.max)
+    predicted <- lev[predicted_idx]
+    return(as.factor(predicted))
+  }
+}
+
+# Calculate confusion matrix metrics
+# For binary: sensitivity, specificity
+# For multi-class: per-class metrics
+calculate_classification_metrics <- function(true_labels, predicted_labels){
+  conf_matrix <- table(Predicted = predicted_labels, Actual = true_labels)
+  n_classes <- length(unique(true_labels))
+
+  if(n_classes == 2){
+    # Binary classification metrics
+    TP <- conf_matrix[2, 2]
+    TN <- conf_matrix[1, 1]
+    FP <- conf_matrix[2, 1]
+    FN <- conf_matrix[1, 2]
+
+    sensitivity <- TP / (TP + FN)
+    specificity <- TN / (TN + FP)
+    accuracy <- (TP + TN) / sum(conf_matrix)
+
+    return(list(
+      confusion_matrix = conf_matrix,
+      sensitivity = sensitivity,
+      specificity = specificity,
+      accuracy = accuracy
+    ))
+  } else {
+    # Multi-class metrics (per-class)
+    # Sensitivity = Recall = TP / (TP + FN) for each class
+    sensitivity_per_class <- diag(conf_matrix) / rowSums(conf_matrix)
+
+    # Precision = TP / (TP + FP) for each class
+    precision_per_class <- diag(conf_matrix) / colSums(conf_matrix)
+
+    # Overall accuracy
+    accuracy <- sum(diag(conf_matrix)) / sum(conf_matrix)
+
+    # Macro-averaged metrics
+    macro_sensitivity <- mean(sensitivity_per_class, na.rm=TRUE)
+    macro_precision <- mean(precision_per_class, na.rm=TRUE)
+
+    return(list(
+      confusion_matrix = conf_matrix,
+      sensitivity_per_class = sensitivity_per_class,
+      precision_per_class = precision_per_class,
+      macro_sensitivity = macro_sensitivity,
+      macro_precision = macro_precision,
+      accuracy = accuracy
+    ))
+  }
+}
+
+##########################
 importfile<-function (datapath,extension,NAstring="NA",sheet=1,skiplines=0,dec=".",sep=","){
   # datapath: path of the file
   #extention: extention of the file : csv, xls, ou xlsx
@@ -700,47 +821,124 @@ testfunction<-function(tabtransform,testparameters){
 }
   
 
-diffexptest<-function(toto,test="Wtest"){ 
-  #fonction test if the variables (in column) of toto (dataframe) are differently 
-  #expressed according to the first variable (first column) (two groups : OP Tem)
-  #test= Ttes: porsuit a sTudent test for each column (parmetric test), the sample have to be normal and with the same variance
-  #Wtest : willcoxon test (nonparametric), assume that dispersion a on the same scale
+diffexptest<-function(toto,test="Wtest"){
+  #fonction test if the variables (in column) of toto (dataframe) are differently
+  #expressed according to the first variable (first column)
+  #For binary classification: Wilcoxon/Student test
+  #For multi-class: Kruskal-Wallis/ANOVA test
+  #test= Ttest: Student test (parametric), Wtest: Wilcoxon (nonparametric)
+  #      Kruskal: Kruskal-Wallis (multi-class nonparametric), ANOVA: ANOVA (multi-class parametric)
+
   group<-toto[,1]
   toto<-toto[,-1]
-  pval<-vector()
-  adjustpval<-vector()
-  mlev1<-vector()
-  namelev1<-levels(group)[1]
-  mlev2<-vector()
-  namelev2<-levels(group)[2]
-  FC1o2<-vector()
-  FC2o1<-vector()
-  auc<-vector()
-  resyounden<-matrix(ncol = 4,nrow = ncol(toto))
-  for (i in 1:max(1,ncol(toto)) ){
-    lev1<-toto[which(group==namelev1),i]
-    lev2<-toto[which(group==namelev2),i]
-    mlev1[i]<-mean(lev1,na.rm = T)+0.0001
-    mlev2[i]<-mean(lev2,na.rm = T)+0.0001
-    
-    FC1o2[i]<-mlev1[i]/mlev2[i]
-    FC2o1[i]<-mlev2[i]/mlev1[i]
-    auc[i]<-auc(roc(group,toto[,i],quiet=TRUE))
-    resyounden[i,]<-younden(response = group,predictor = toto[,i])
-    if( test=="Ttest"){pval[i]<-t.test(x = lev1,y = lev2)$p.value}
-    else if( test=="Wtest"){pval[i]<-wilcox.test(lev1 ,lev2,exact = F)$p.value } 
-  } 
-  pval[which(is.na(pval))]<-1
-  adjustpval<-p.adjust(pval, method = "BH")
-  logFC1o2<-log2(abs(FC1o2))
-  logFC2o1<-log2(abs(FC2o1))
-  
-  
-  listgen<-data.frame(colnames(toto),pval,adjustpval,auc,FC1o2,logFC1o2,FC2o1,logFC2o1,mlev1,mlev2,resyounden) 
-  colnames(listgen)<-c("name",paste("pval",test,sep = ""),paste("BHadjustpval",test,sep = ""),"AUC",paste("FoldChange ",namelev1,"/",namelev2,sep = ""),paste("logFoldChange ",namelev1,"/",namelev2,sep = ""),
-                       paste("FoldChange ",namelev2,"/",namelev1,sep = ""),paste("logFoldChange ",namelev2,"/",namelev1,sep = ""),paste("mean",namelev1,sep = ""),paste("mean",namelev2,sep = ""),
-                       "younden criterion","sensibility younden","specificity younden","threshold younden") 
-  return(listgen)
+  n_classes <- length(levels(group))
+
+  # Detect if binary or multi-class
+  if(n_classes == 2){
+    # BINARY CLASSIFICATION - Original code
+    pval<-vector()
+    adjustpval<-vector()
+    mlev1<-vector()
+    namelev1<-levels(group)[1]
+    mlev2<-vector()
+    namelev2<-levels(group)[2]
+    FC1o2<-vector()
+    FC2o1<-vector()
+    auc<-vector()
+    resyounden<-matrix(ncol = 4,nrow = ncol(toto))
+    for (i in 1:max(1,ncol(toto)) ){
+      lev1<-toto[which(group==namelev1),i]
+      lev2<-toto[which(group==namelev2),i]
+      mlev1[i]<-mean(lev1,na.rm = T)+0.0001
+      mlev2[i]<-mean(lev2,na.rm = T)+0.0001
+
+      FC1o2[i]<-mlev1[i]/mlev2[i]
+      FC2o1[i]<-mlev2[i]/mlev1[i]
+      auc[i]<-auc(roc(group,toto[,i],quiet=TRUE))
+      resyounden[i,]<-younden(response = group,predictor = toto[,i])
+      if( test=="Ttest"){pval[i]<-t.test(x = lev1,y = lev2)$p.value}
+      else if( test=="Wtest"){pval[i]<-wilcox.test(lev1 ,lev2,exact = F)$p.value }
+    }
+    pval[which(is.na(pval))]<-1
+    adjustpval<-p.adjust(pval, method = "BH")
+    logFC1o2<-log2(abs(FC1o2))
+    logFC2o1<-log2(abs(FC2o1))
+
+    listgen<-data.frame(colnames(toto),pval,adjustpval,auc,FC1o2,logFC1o2,FC2o1,logFC2o1,mlev1,mlev2,resyounden)
+    colnames(listgen)<-c("name",paste("pval",test,sep = ""),paste("BHadjustpval",test,sep = ""),"AUC",paste("FoldChange ",namelev1,"/",namelev2,sep = ""),paste("logFoldChange ",namelev1,"/",namelev2,sep = ""),
+                         paste("FoldChange ",namelev2,"/",namelev1,sep = ""),paste("logFoldChange ",namelev2,"/",namelev1,sep = ""),paste("mean",namelev1,sep = ""),paste("mean",namelev2,sep = ""),
+                         "younden criterion","sensibility younden","specificity younden","threshold younden")
+    return(listgen)
+
+  } else {
+    # MULTI-CLASS CLASSIFICATION - New implementation
+    pval<-vector()
+    adjustpval<-vector()
+
+    # Calculate mean for each class
+    means_by_class <- matrix(nrow = ncol(toto), ncol = n_classes)
+    colnames_means <- paste("mean", levels(group), sep = "_")
+
+    # Calculate overall mean for fold change reference
+    mean_overall <- vector()
+
+    # For multi-class, use multiclass.roc from pROC
+    auc_multiclass <- vector()
+
+    for (i in 1:max(1,ncol(toto)) ){
+      # Statistical test
+      if(test == "Kruskal" || test == "Wtest"){
+        # Kruskal-Wallis test (non-parametric for multiple groups)
+        pval[i] <- tryCatch({
+          kruskal.test(toto[,i] ~ group)$p.value
+        }, error = function(e) return(1))
+      } else if(test == "ANOVA" || test == "Ttest"){
+        # ANOVA (parametric for multiple groups)
+        pval[i] <- tryCatch({
+          summary(aov(toto[,i] ~ group))[[1]][1,"Pr(>F)"]
+        }, error = function(e) return(1))
+      }
+
+      # Calculate means for each class
+      for(j in 1:n_classes){
+        class_data <- toto[which(group == levels(group)[j]), i]
+        means_by_class[i, j] <- mean(class_data, na.rm = TRUE) + 0.0001
+      }
+
+      # Overall mean for reference
+      mean_overall[i] <- mean(toto[,i], na.rm = TRUE) + 0.0001
+
+      # Multi-class AUC (one-vs-rest average)
+      auc_multiclass[i] <- tryCatch({
+        roc_obj <- multiclass.roc(group, toto[,i], quiet=TRUE)
+        as.numeric(auc(roc_obj))
+      }, error = function(e) return(0.5))
+    }
+
+    pval[which(is.na(pval))]<-1
+    adjustpval<-p.adjust(pval, method = "BH")
+
+    # Build result dataframe for multi-class
+    listgen <- data.frame(
+      name = colnames(toto),
+      pval = pval,
+      adjustpval = adjustpval,
+      auc = auc_multiclass,
+      mean_overall = mean_overall
+    )
+
+    # Add means for each class
+    for(j in 1:n_classes){
+      listgen[, paste("mean", levels(group)[j], sep = "_")] <- means_by_class[, j]
+    }
+
+    # Rename columns
+    colnames(listgen)[2] <- paste("pval", test, sep = "")
+    colnames(listgen)[3] <- paste("BHadjustpval", test, sep = "")
+    colnames(listgen)[4] <- "AUC_multiclass"
+
+    return(listgen)
+  }
 }
 
 younden<-function(response,predictor){
@@ -766,9 +964,8 @@ multivariateselection<-function(toto, method="lasso", lambda=NULL, alpha=0.5, nl
   # alpha: elastic net mixing parameter (0=ridge, 1=lasso)
   # nlambda: number of lambda values to test
 
-  # IMPORTANT: Encode group so that 1 = first level (positif), 0 = second level (negatif)
   lev <- levels(toto[,1])
-  group <- ifelse(toto[,1] == lev[1], 1, 0)
+  n_classes <- length(lev)
   x <- as.matrix(toto[,-1])
 
   # Set alpha based on method
@@ -780,77 +977,172 @@ multivariateselection<-function(toto, method="lasso", lambda=NULL, alpha=0.5, nl
     # alpha is provided by user, default 0.5
   }
 
-  # Perform cross-validation to find optimal lambda if not provided
-  if(is.null(lambda)){
-    set.seed(20011203)
-    cvfit <- cv.glmnet(x, group, family="binomial", alpha=alpha, nlambda=nlambda,
-                       type.measure="auc", nfolds=min(5, nrow(toto)-1)
-                       )
-    lambda <- cvfit$lambda.min  # lambda that gives minimum CV error
-    lambda_1se <- cvfit$lambda.1se  # lambda within 1 SE of minimum
+  # Detect if binary or multi-class
+  if(n_classes == 2){
+    # BINARY CLASSIFICATION - Original code
+    # Encode group so that 1 = first level (positif), 0 = second level (negatif)
+    group <- ifelse(toto[,1] == lev[1], 1, 0)
+
+    # Perform cross-validation to find optimal lambda if not provided
+    if(is.null(lambda)){
+      set.seed(20011203)
+      cvfit <- cv.glmnet(x, group, family="binomial", alpha=alpha, nlambda=nlambda,
+                         type.measure="auc", nfolds=min(5, nrow(toto)-1)
+                         )
+      lambda <- cvfit$lambda.min  # lambda that gives minimum CV error
+      lambda_1se <- cvfit$lambda.1se  # lambda within 1 SE of minimum
+    } else {
+      cvfit <- NULL
+      lambda_1se <- lambda
+    }
+
+    # Fit model with optimal lambda
+    fit <- glmnet(x, group, family="binomial", alpha=alpha, lambda=lambda)
+
+    # Extract coefficients
+    coef_matrix <- as.matrix(coef(fit))
+    coef_values <- coef_matrix[-1, 1]  # Remove intercept
+    names(coef_values) <- colnames(x)
+
+    # Select non-zero coefficients
+    selected_vars <- names(coef_values[coef_values != 0])
+
+    # Calculate additional statistics for selected variables
+    if(length(selected_vars) > 0){
+      # AUC for each selected variable
+      auc_values <- sapply(selected_vars, function(var){
+        auc(roc(group, x[, var], quiet=TRUE))
+      })
+
+      # Mean values by group
+      mlev1 <- colMeans(x[which(group==0), selected_vars, drop=FALSE], na.rm=TRUE)
+      mlev2 <- colMeans(x[which(group==1), selected_vars, drop=FALSE], na.rm=TRUE)
+
+      # Fold change : class 1 sur class 2:  case versus control
+      FC1o2 <- mlev1 / (mlev2 + 0.0001)
+      logFC1o2 <- log2(abs(FC1o2))
+
+      # Create results dataframe
+      results <- data.frame(
+        name = selected_vars,
+        coefficient = coef_values[selected_vars],
+        AUC = auc_values,
+        FoldChange = FC1o2,
+        logFoldChange = logFC1o2,
+        mean_group1 = mlev1,
+        mean_group2 = mlev2,
+        stringsAsFactors = FALSE
+      )
+
+      # Sort by absolute coefficient value
+      results <- results[order(abs(results$coefficient), decreasing=TRUE), ]
+    } else {
+      results <- data.frame()
+    }
+
+    # Return results with model information
+    return(list(
+      results = results,
+      selected_vars = selected_vars,
+      all_coefficients = coef_values,
+      lambda = lambda,
+      lambda_1se = lambda_1se,
+      alpha = alpha,
+      cvfit = cvfit,
+      fit = fit,
+      method = method
+    ))
+
   } else {
-    cvfit <- NULL
-    lambda_1se <- lambda
+    # MULTI-CLASS CLASSIFICATION - New implementation
+    # Encode group as numeric 0, 1, 2, ...
+    group_numeric <- as.numeric(toto[,1]) - 1
+
+    # Perform cross-validation to find optimal lambda if not provided
+    if(is.null(lambda)){
+      set.seed(20011203)
+      cvfit <- cv.glmnet(x, group_numeric, family="multinomial",
+                         alpha=alpha, nlambda=nlambda,
+                         type.measure="class", nfolds=min(5, nrow(toto)-1),
+                         type.multinomial = "grouped"
+                         )
+      lambda <- cvfit$lambda.min  # lambda that gives minimum CV error
+      lambda_1se <- cvfit$lambda.1se  # lambda within 1 SE of minimum
+    } else {
+      cvfit <- NULL
+      lambda_1se <- lambda
+    }
+
+    # Fit model with optimal lambda
+    fit <- glmnet(x, group_numeric, family="multinomial", alpha=alpha, lambda=lambda,
+                  type.multinomial = "grouped")
+
+    # Extract coefficients (list of matrices, one per class)
+    coef_list <- coef(fit, s=lambda)
+
+    # Aggregate coefficients across classes (use max absolute value)
+    coef_aggregated <- rep(0, ncol(x))
+    names(coef_aggregated) <- colnames(x)
+
+    for(class_idx in 1:n_classes){
+      coef_matrix <- as.matrix(coef_list[[class_idx]])
+      coef_values_class <- coef_matrix[-1, 1]  # Remove intercept
+      # Keep maximum absolute coefficient across classes
+      coef_aggregated <- pmax(abs(coef_aggregated), abs(coef_values_class))
+    }
+
+    # Select non-zero coefficients
+    selected_vars <- names(coef_aggregated[coef_aggregated > 1e-10])
+
+    # Calculate additional statistics for selected variables
+    if(length(selected_vars) > 0){
+      # Multi-class AUC for each selected variable
+      auc_values <- sapply(selected_vars, function(var){
+        tryCatch({
+          roc_obj <- multiclass.roc(toto[,1], x[, var], quiet=TRUE)
+          as.numeric(auc(roc_obj))
+        }, error = function(e) return(0.5))
+      })
+
+      # Mean values by group for each class
+      means_matrix <- matrix(nrow=length(selected_vars), ncol=n_classes)
+      for(j in 1:n_classes){
+        means_matrix[, j] <- colMeans(x[which(toto[,1] == lev[j]), selected_vars, drop=FALSE], na.rm=TRUE)
+      }
+      colnames(means_matrix) <- paste("mean", lev, sep="_")
+
+      # Create results dataframe
+      results <- data.frame(
+        name = selected_vars,
+        coefficient_max = coef_aggregated[selected_vars],
+        AUC_multiclass = auc_values,
+        stringsAsFactors = FALSE
+      )
+
+      # Add means for each class
+      results <- cbind(results, means_matrix)
+
+      # Sort by absolute coefficient value
+      results <- results[order(abs(results$coefficient_max), decreasing=TRUE), ]
+    } else {
+      results <- data.frame()
+    }
+
+    # Return results with model information
+    return(list(
+      results = results,
+      selected_vars = selected_vars,
+      all_coefficients = coef_aggregated,
+      coef_list = coef_list,  # Full list of coefficients per class
+      lambda = lambda,
+      lambda_1se = lambda_1se,
+      alpha = alpha,
+      cvfit = cvfit,
+      fit = fit,
+      method = method,
+      n_classes = n_classes
+    ))
   }
-
-  # Fit model with optimal lambda
-  fit <- glmnet(x, group, family="binomial", alpha=alpha, lambda=lambda)
-
-  # Extract coefficients
-  coef_matrix <- as.matrix(coef(fit))
-  coef_values <- coef_matrix[-1, 1]  # Remove intercept
-  names(coef_values) <- colnames(x)
-
-  # Select non-zero coefficients
-  selected_vars <- names(coef_values[coef_values != 0])
-
-  # Calculate additional statistics for selected variables
-  if(length(selected_vars) > 0){
-    # AUC for each selected variable
-    auc_values <- sapply(selected_vars, function(var){
-      auc(roc(group, x[, var], quiet=TRUE))
-    })
-
-    # Mean values by group
-    mlev1 <- colMeans(x[which(group==0), selected_vars, drop=FALSE], na.rm=TRUE)
-    mlev2 <- colMeans(x[which(group==1), selected_vars, drop=FALSE], na.rm=TRUE)
-
-    # Fold change : class 1 sur class 2:  case versus control
-    # class 1 : first level (positif)
-    # class 2 : second level (negatif)
-    FC1o2 <- mlev1 / (mlev2 + 0.0001)
-    logFC1o2 <- log2(abs(FC1o2))
-
-    # Create results dataframe
-    results <- data.frame(
-      name = selected_vars,
-      coefficient = coef_values[selected_vars],
-      AUC = auc_values,
-      FoldChange = FC1o2,
-      logFoldChange = logFC1o2,
-      mean_group1 = mlev1,
-      mean_group2 = mlev2,
-      stringsAsFactors = FALSE
-    )
-
-    # Sort by absolute coefficient value
-    results <- results[order(abs(results$coefficient), decreasing=TRUE), ]
-  } else {
-    results <- data.frame()
-  }
-
-  # Return results with model information
-  return(list(
-    results = results,
-    selected_vars = selected_vars,
-    all_coefficients = coef_values,
-    lambda = lambda,
-    lambda_1se = lambda_1se,
-    alpha = alpha,
-    cvfit = cvfit,
-    fit = fit,
-    method = method
-  ))
 }
 
 ##########################
@@ -2544,41 +2836,142 @@ replaceNAoneline<-function(lineNA,toto,rempNA){
 
 ROCcurve<-function(validation,decisionvalues,maintitle="Roc curve",graph=T,ggplot=T){
   validation<-factor(validation,levels = rev(levels(validation)),ordered = TRUE)
-  
-  #argument : validation, vector of appartenance,
-  #            decisionvalues, vector of scores
-  #fulldata<-rocdata(grp = validation, pred = as.vector(decisionvalues))
-  data<-roc(validation,decisionvalues)
-  if(!graph){return(data.frame("sensitivity"=data$sensitivities,"specificity"=data$specificities,"thresholds"=data$thresholds))}
-  if(!ggplot){plot(data)}
-  if(ggplot){
-    y<-rev(data$sensitivities)
-    x<-rev(data$specificities)
-    roc<-data.frame(x,y)
-    auc<-as.numeric(auc(data))
-    
-    col<-gg_color_hue(3)
-    roccol<-col[1]
-    bin = 0.01
-    diag = data.frame(x = seq(0, 1, by = bin), y = rev(seq(0, 1, by = bin)))
-    p <- ggplot(data = roc, aes(x = x, y = y)) + 
-      geom_point(color = roccol) +
-      geom_line(color = roccol) + 
-      geom_line(data = diag, aes(x = x, y = y), color =col[3])
-    sp = 19
-    f <- p + geom_point(data = diag, aes(x = x, y = y), color = "lightgrey", shape = sp) + 
-      theme(axis.text = element_text(size = 16), 
-            title = element_text(size = 15) , 
-            axis.text.x = element_text(size = 12 ,  face = 'bold' ) ,
-            axis.text.y =  element_text(size = 12 , face =  'bold'),
-            axis.title.x = element_text(size = 15 , face = 'bold'), 
-            axis.title.y =  element_text(size = 15 , face = 'bold')
-            ) + 
-      labs(y = "Sensitivity", x = "1 - Specificity", title = maintitle) +
-      annotate("text",x=0.2,y=0.1,label=paste("AUC = ",as.character(round(auc,digits = 3))),size=7,colour= roccol)+
-      scale_x_reverse()
-    
-    f
+  n_classes <- length(levels(validation))
+
+  # Detect if binary or multi-class
+  if(n_classes == 2){
+    # BINARY CLASSIFICATION - Original code
+    #argument : validation, vector of appartenance,
+    #            decisionvalues, vector of scores
+    data<-roc(validation,decisionvalues)
+    if(!graph){return(data.frame("sensitivity"=data$sensitivities,"specificity"=data$specificities,"thresholds"=data$thresholds))}
+    if(!ggplot){plot(data)}
+    if(ggplot){
+      y<-rev(data$sensitivities)
+      x<-rev(data$specificities)
+      roc<-data.frame(x,y)
+      auc<-as.numeric(auc(data))
+
+      col<-gg_color_hue(3)
+      roccol<-col[1]
+      bin = 0.01
+      diag = data.frame(x = seq(0, 1, by = bin), y = rev(seq(0, 1, by = bin)))
+      p <- ggplot(data = roc, aes(x = x, y = y)) +
+        geom_point(color = roccol) +
+        geom_line(color = roccol) +
+        geom_line(data = diag, aes(x = x, y = y), color =col[3])
+      sp = 19
+      f <- p + geom_point(data = diag, aes(x = x, y = y), color = "lightgrey", shape = sp) +
+        theme(axis.text = element_text(size = 16),
+              title = element_text(size = 15) ,
+              axis.text.x = element_text(size = 12 ,  face = 'bold' ) ,
+              axis.text.y =  element_text(size = 12 , face =  'bold'),
+              axis.title.x = element_text(size = 15 , face = 'bold'),
+              axis.title.y =  element_text(size = 15 , face = 'bold')
+              ) +
+        labs(y = "Sensitivity", x = "1 - Specificity", title = maintitle) +
+        annotate("text",x=0.2,y=0.1,label=paste("AUC = ",as.character(round(auc,digits = 3))),size=7,colour= roccol)+
+        scale_x_reverse()
+
+      f
+    }
+  } else {
+    # MULTI-CLASS CLASSIFICATION - New implementation
+    # decisionvalues should be a matrix (n_samples x n_classes) for multi-class
+
+    # Check if decisionvalues is a matrix
+    if(!is.matrix(decisionvalues)){
+      # If it's a vector, we can't properly plot multi-class ROC
+      # Return a simple message
+      if(!graph){
+        return(data.frame(message="Multi-class ROC requires probability matrix"))
+      }
+      if(ggplot){
+        p <- ggplot() +
+          annotate("text", x=0.5, y=0.5, label="Multi-class ROC requires\nprobability matrix for each class", size=6) +
+          labs(title = maintitle) +
+          theme_minimal()
+        return(p)
+      }
+    }
+
+    # Calculate One-vs-Rest ROC curves for each class
+    roc_list <- list()
+    auc_values <- vector()
+    class_names <- levels(validation)
+
+    for(i in 1:n_classes){
+      # Create binary indicator for this class
+      binary_response <- ifelse(as.numeric(validation) == (n_classes - i + 1), 1, 0)
+
+      # Get probabilities for this class
+      class_probs <- decisionvalues[, i]
+
+      # Calculate ROC
+      roc_obj <- tryCatch({
+        roc(binary_response, class_probs, quiet=TRUE)
+      }, error = function(e){
+        return(NULL)
+      })
+
+      if(!is.null(roc_obj)){
+        roc_list[[class_names[n_classes - i + 1]]] <- roc_obj
+        auc_values[i] <- as.numeric(auc(roc_obj))
+      }
+    }
+
+    # Calculate mean AUC
+    mean_auc <- mean(auc_values, na.rm=TRUE)
+
+    if(!graph){
+      return(data.frame(
+        class = names(roc_list),
+        auc = auc_values
+      ))
+    }
+
+    if(ggplot){
+      # Plot One-vs-Rest ROC curves
+      col <- gg_color_hue(n_classes + 1)
+      bin = 0.01
+      diag = data.frame(x = seq(0, 1, by = bin), y = rev(seq(0, 1, by = bin)))
+
+      # Create plot
+      p <- ggplot() +
+        geom_line(data = diag, aes(x = x, y = y), color = col[n_classes + 1], linetype="dashed")
+
+      # Add ROC curve for each class
+      for(i in 1:length(roc_list)){
+        class_name <- names(roc_list)[i]
+        roc_obj <- roc_list[[class_name]]
+
+        y <- rev(roc_obj$sensitivities)
+        x <- rev(roc_obj$specificities)
+        roc_df <- data.frame(x=x, y=y, class=class_name)
+
+        p <- p +
+          geom_line(data = roc_df, aes(x = x, y = y, color = class), size=1)
+      }
+
+      # Add AUC annotations
+      auc_text <- paste0(names(roc_list), ": ", round(auc_values, 3), collapse="\n")
+      mean_auc_text <- paste0("Mean AUC: ", round(mean_auc, 3))
+
+      f <- p +
+        theme(axis.text = element_text(size = 16),
+              title = element_text(size = 15),
+              axis.text.x = element_text(size = 12, face = 'bold'),
+              axis.text.y = element_text(size = 12, face = 'bold'),
+              axis.title.x = element_text(size = 15, face = 'bold'),
+              axis.title.y = element_text(size = 15, face = 'bold'),
+              legend.position = "right") +
+        labs(y = "Sensitivity (TPR)", x = "1 - Specificity (FPR)",
+             title = maintitle, color = "Class") +
+        annotate("text", x=0.3, y=0.1, label=mean_auc_text, size=5, fontface="bold") +
+        scale_x_reverse()
+
+      f
+    }
   }
 }
 
