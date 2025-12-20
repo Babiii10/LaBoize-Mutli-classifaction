@@ -1997,49 +1997,82 @@ modelfunction <- function(learningmodel,
         model<-featureselect$model
         learningmodel<-featureselect$dataset
       }
-      
-      # calculate the decision values for the learning set
-      scorelearning <-model$decision.values
-      #scorelearning = attr(e1071:::predict.svm(model, learningmodel[,-1], probability  = TRUE), "probabilities")
-      if(sum(lev==(strsplit(colnames(scorelearning),split = "/")[[1]]))==0){
-        scorelearning<-scorelearning*(-1)
-        colnames(scorelearning)<-paste(lev[1],"/",lev[2],sep="")
+
+      # Get scores for binary and multi-class
+      n_classes <- get_n_classes(learningmodel[,1])
+
+      if(n_classes == 2){
+        # Binary classification - use decision values
+        scorelearning <-model$decision.values
+        if(sum(lev==(strsplit(colnames(scorelearning),split = "/")[[1]]))==0){
+          scorelearning<-scorelearning*(-1)
+          colnames(scorelearning)<-paste(lev[1],"/",lev[2],sep="")
+        }
+
+        predictclasslearning<-factor(levels = lev)
+        predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
+        predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
+        predictclasslearning<-as.factor(predictclasslearning)
+      } else {
+        # Multi-class classification - use probabilities
+        # SVM with probability=TRUE returns probability matrix for multi-class
+        pred_probs <- attr(predict(model, learningmodel[,-1], probability=TRUE), "probabilities")
+        scorelearning <- pred_probs  # Matrix (n_samples × n_classes)
+
+        # Reorder columns to match level order
+        scorelearning <- scorelearning[, lev]
+
+        # Predict using argmax (no threshold for multi-class)
+        predictclasslearning <- predict_from_scores(scorelearning, learningmodel[,1], threshold=NULL)
       }
-       
-      # Obtenir les probabilités au lieu des decision values
-      # pred_probs <- attr(predict(model, learningmodel[,-1], probability=TRUE), "probabilities")
-      # scorelearning <- data.frame(pred_probs[, lev["positif"]])
-      # colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
-      
-      predictclasslearning<-factor(levels = lev)
-      predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
-      predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
-      predictclasslearning<-as.factor(predictclasslearning)
     }
 
     if(modelparameters$modeltype=="lightgbm"){
 
       # LightGBM gradient boosting
       x <- as.matrix(learningmodel[,-1])
-      # IMPORTANT: Encode y so that 1 = lev["positif"] (first level), 0 = lev["negatif"] (second level)
-      y <- ifelse(learningmodel[,1] == lev["positif"], 1, 0)
+      n_classes <- get_n_classes(learningmodel[,1])
+
+      # Encode y based on binary or multi-class
+      if(n_classes == 2){
+        # Binary: 1 = lev["positif"] (first level), 0 = lev["negatif"] (second level)
+        y <- ifelse(learningmodel[,1] == lev["positif"], 1, 0)
+      } else {
+        # Multi-class: encode as 0, 1, 2, ... (n_classes-1)
+        y <- as.numeric(learningmodel[,1]) - 1
+      }
+
       # Create LightGBM dataset
       dtrain <- lgb.Dataset(data = x, label = y)
       # Determine hyperparameters
       if(is.null(modelparameters$autotunelgb) || modelparameters$autotunelgb){
         # Perform hyperparameter tuning using cross-validation
         set.seed(20011203)
-        # Parameter grid search
-        best_params <- list(
-          objective = "binary",
-          metric = "auc",
-          num_leaves = 31,
-          learning_rate = 0.05,
-          feature_fraction = 0.9,
-          bagging_fraction = 0.8,
-          bagging_freq = 5,
-          verbose = -1
-        )
+        # Parameter grid search - adapt to binary or multi-class
+        if(n_classes == 2){
+          best_params <- list(
+            objective = "binary",
+            metric = "auc",
+            num_leaves = 31,
+            learning_rate = 0.05,
+            feature_fraction = 0.9,
+            bagging_fraction = 0.8,
+            bagging_freq = 5,
+            verbose = -1
+          )
+        } else {
+          best_params <- list(
+            objective = "multiclass",
+            num_class = n_classes,
+            metric = "multi_logloss",
+            num_leaves = 31,
+            learning_rate = 0.05,
+            feature_fraction = 0.9,
+            bagging_fraction = 0.8,
+            bagging_freq = 5,
+            verbose = -1
+          )
+        }
 
         # Cross-validation to find optimal nrounds
         cv_results <- lgb.cv(
@@ -2069,16 +2102,32 @@ modelfunction <- function(learningmodel,
         nrounds_param <- ifelse(is.null(modelparameters$nrounds_lgb), 100, modelparameters$nrounds_lgb)
         num_leaves_param <- ifelse(is.null(modelparameters$num_leaves), 31, modelparameters$num_leaves)
         learning_rate_param <- ifelse(is.null(modelparameters$learning_rate_lgb), 0.05, modelparameters$learning_rate_lgb)
-        params <- list(
-          objective = "binary",
-          metric = "auc",
-          num_leaves = num_leaves_param,
-          learning_rate = learning_rate_param,
-          feature_fraction = 0.9,
-          bagging_fraction = 0.8,
-          bagging_freq = 5,
-          verbose = -1
-        )
+
+        # Adapt params to binary or multi-class
+        if(n_classes == 2){
+          params <- list(
+            objective = "binary",
+            metric = "auc",
+            num_leaves = num_leaves_param,
+            learning_rate = learning_rate_param,
+            feature_fraction = 0.9,
+            bagging_fraction = 0.8,
+            bagging_freq = 5,
+            verbose = -1
+          )
+        } else {
+          params <- list(
+            objective = "multiclass",
+            num_class = n_classes,
+            metric = "multi_logloss",
+            num_leaves = num_leaves_param,
+            learning_rate = learning_rate_param,
+            feature_fraction = 0.9,
+            bagging_fraction = 0.8,
+            bagging_freq = 5,
+            verbose = -1
+          )
+        }
 
  
 
@@ -2097,14 +2146,24 @@ modelfunction <- function(learningmodel,
         model$optimal_learning_rate <- learning_rate_param
       }
 
-      # Make predictions (probabilities)
-      scorelearning <- predict(model, x)
-      scorelearning <- data.frame(scorelearning)
-      colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
-      predictclasslearning<-factor(levels = lev)
-      predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
-      predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
-      predictclasslearning<-as.factor(predictclasslearning)
+      # Make predictions (probabilities) - adapt to binary or multi-class
+      predictions_raw <- predict(model, x)
+
+      if(n_classes == 2){
+        # Binary: predictions_raw is a vector of probabilities for positive class
+        scorelearning <- data.frame(predictions_raw)
+        colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
+        predictclasslearning<-factor(levels = lev)
+        predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
+        predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
+        predictclasslearning<-as.factor(predictclasslearning)
+      } else {
+        # Multi-class: predictions_raw is a matrix (n_samples × n_classes)
+        scorelearning <- matrix(predictions_raw, ncol=n_classes, byrow=TRUE)
+        colnames(scorelearning) <- lev
+        # Predict using argmax (no threshold for multi-class)
+        predictclasslearning <- predict_from_scores(scorelearning, learningmodel[,1], threshold=NULL)
+      }
     }
 
     if(modelparameters$modeltype=="naivebayes"){
@@ -2148,14 +2207,24 @@ modelfunction <- function(learningmodel,
       model$model_type <- "naivebayes"
       model$optimal_laplace <- optimal_laplace
 
-      # Make predictions (probabilities)
+      # Make predictions (probabilities) - adapt to binary or multi-class
       pred_probs <- e1071:::predict.naiveBayes(model, learningmodel[,-1], type="raw")
-      scorelearning <- data.frame(pred_probs[, lev["positif"]])
-      colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
-      predictclasslearning<-factor(levels = lev)
-      predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
-      predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
-      predictclasslearning<-as.factor(predictclasslearning)
+      n_classes <- get_n_classes(learningmodel[,1])
+
+      if(n_classes == 2){
+        # Binary: extract probability for positive class
+        scorelearning <- data.frame(pred_probs[, lev["positif"]])
+        colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
+        predictclasslearning<-factor(levels = lev)
+        predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
+        predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
+        predictclasslearning<-as.factor(predictclasslearning)
+      } else {
+        # Multi-class: pred_probs is already a matrix (n_samples × n_classes)
+        scorelearning <- pred_probs[, lev]  # Reorder columns to match level order
+        # Predict using argmax (no threshold for multi-class)
+        predictclasslearning <- predict_from_scores(scorelearning, learningmodel[,1], threshold=NULL)
+      }
     }
 
     if(modelparameters$modeltype=="knn"){
@@ -2279,45 +2348,83 @@ modelfunction <- function(learningmodel,
 
       # Make predictions using knn with probability estimation
       # For probability, we'll use the proportion of k neighbors in each class
+      n_classes <- get_n_classes(learningmodel[,1])
 
-      scorelearning_vec <- numeric(nrow(learningmodel))
+      if(n_classes == 2){
+        # Binary classification - calculate probability for positive class only
+        scorelearning_vec <- numeric(nrow(learningmodel))
 
-      for(i in 1:nrow(learningmodel)){
-        # Leave-one-out prediction for training set
-        train_idx <- setdiff(1:nrow(learningmodel), i)
+        for(i in 1:nrow(learningmodel)){
+          # Leave-one-out prediction for training set
+          train_idx <- setdiff(1:nrow(learningmodel), i)
 
-        # Get k nearest neighbors
-        distances <- apply(learningmodel[train_idx, -1], 1, function(row) {
-          sqrt(sum((as.numeric(learningmodel[i, -1]) - as.numeric(row))^2))
+          # Get k nearest neighbors
+          distances <- apply(learningmodel[train_idx, -1], 1, function(row) {
+            sqrt(sum((as.numeric(learningmodel[i, -1]) - as.numeric(row))^2))
+          })
 
-        })
+          k_nearest_idx <- order(distances)[1:optimal_k]
+          k_nearest_labels <- learningmodel[train_idx, 1][k_nearest_idx]
 
-        k_nearest_idx <- order(distances)[1:optimal_k]
-        k_nearest_labels <- learningmodel[train_idx, 1][k_nearest_idx]
+          # Calculate probability as proportion of positif class
+          scorelearning_vec[i] <- sum(k_nearest_labels == lev["positif"]) / optimal_k
+        }
 
-        # Calculate probability as proportion of positif class
+        scorelearning <- data.frame(scorelearning_vec)
+        colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
 
-        scorelearning_vec[i] <- sum(k_nearest_labels == lev["positif"]) / optimal_k
+        predictclasslearning<-factor(levels = lev)
+        predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
+        predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
+        predictclasslearning<-as.factor(predictclasslearning)
+
+      } else {
+        # Multi-class - calculate probabilities for all classes
+        scorelearning_matrix <- matrix(0, nrow=nrow(learningmodel), ncol=n_classes)
+        colnames(scorelearning_matrix) <- lev
+
+        for(i in 1:nrow(learningmodel)){
+          # Leave-one-out prediction for training set
+          train_idx <- setdiff(1:nrow(learningmodel), i)
+
+          # Get k nearest neighbors
+          distances <- apply(learningmodel[train_idx, -1], 1, function(row) {
+            sqrt(sum((as.numeric(learningmodel[i, -1]) - as.numeric(row))^2))
+          })
+
+          k_nearest_idx <- order(distances)[1:optimal_k]
+          k_nearest_labels <- learningmodel[train_idx, 1][k_nearest_idx]
+
+          # Calculate probability for each class as proportion of k neighbors
+          for(j in 1:n_classes){
+            scorelearning_matrix[i, j] <- sum(k_nearest_labels == lev[j]) / optimal_k
+          }
+        }
+
+        scorelearning <- scorelearning_matrix
+        # Predict using argmax (no threshold for multi-class)
+        predictclasslearning <- predict_from_scores(scorelearning, learningmodel[,1], threshold=NULL)
       }
-
- 
-
-      scorelearning <- data.frame(scorelearning_vec)
-      colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
-
-      predictclasslearning<-factor(levels = lev)
-      predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
-      predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
-      predictclasslearning<-as.factor(predictclasslearning)
 
     }
 
     if(modelparameters$modeltype=="elasticnet"){
       # Penalized Logistic Regression (ElasticNet)
       x <- as.matrix(learningmodel[,-1])
-      # IMPORTANT: Encode y so that 1 = lev["positif"] (first level), 0 = lev["negatif"] (second level)
-      # This ensures that predict returns P(lev["positif"])
-      y <- ifelse(learningmodel[,1] == lev["positif"], 1, 0)
+      n_classes <- get_n_classes(learningmodel[,1])
+
+      # Encode y based on binary or multi-class
+      if(n_classes == 2){
+        # Binary: 1 = lev["positif"] (first level), 0 = lev["negatif"] (second level)
+        y <- ifelse(learningmodel[,1] == lev["positif"], 1, 0)
+        family_param <- "binomial"
+        type_measure_param <- "auc"
+      } else {
+        # Multi-class: factor with original levels
+        y <- learningmodel[,1]
+        family_param <- "multinomial"
+        type_measure_param <- "class"
+      }
       
       # Get hyperparameters (use defaults if not provided)
       alpha_param <- ifelse(is.null(modelparameters$alpha), 0.5, modelparameters$alpha)
@@ -2356,38 +2463,32 @@ modelfunction <- function(learningmodel,
           
           # Use the best parameters to fit with cv.glmnet for consistency
           set.seed(20011203)
-          cvfit <- cv.glmnet(x, y, family="binomial", alpha=alpha_param,
-                             type.measure="auc", nfolds=min(10, nrow(learningmodel)-1))
+          cvfit <- cv.glmnet(x, y, family=family_param, alpha=alpha_param,
+                             type.measure=type_measure_param, nfolds=min(10, nrow(learningmodel)-1))
           lambda_param <- cvfit$lambda.min
           model <- list(glmnet_model=cvfit, lambda=lambda_param, alpha=alpha_param,
                         cvfit=cvfit, optimal_lambda=lambda_param, lambda_1se=cvfit$lambda.1se)
         } else {
           # Fallback to traditional cv.glmnet if GridSearchCV fails
           set.seed(20011203)
-          cvfit <- cv.glmnet(x, y, family="binomial", alpha=alpha_param,
-                             type.measure="auc", nfolds=min(10, nrow(learningmodel)-1))
+          cvfit <- cv.glmnet(x, y, family=family_param, alpha=alpha_param,
+                             type.measure=type_measure_param, nfolds=min(10, nrow(learningmodel)-1))
           lambda_param <- cvfit$lambda.min
           model <- list(glmnet_model=cvfit, lambda=lambda_param, alpha=alpha_param,
                         cvfit=cvfit, optimal_lambda=lambda_param, lambda_1se=cvfit$lambda.1se)
         }
       } else if(is.null(lambda_param)){
         # Perform cross-validation to find optimal lambda if not provided
-        #cat("on est dans le if du is.null(lambda_param) \n")
         set.seed(20011203)
-        cvfit <- cv.glmnet(x, y, family="binomial", alpha=alpha_param,
-                           type.measure="auc", nfolds=min(10, nrow(learningmodel)-1))
+        cvfit <- cv.glmnet(x, y, family=family_param, alpha=alpha_param,
+                           type.measure=type_measure_param, nfolds=min(10, nrow(learningmodel)-1))
         lambda_param <- cvfit$lambda.min
-        # if(!is.null(cvfit$glmnet.fit)){
-        #   fit <- cvfit$glmnet.fit
-        # } else {
-        #   fit <- glmnet(x, y, family="binomial", alpha=alpha_param)
-        # }
         model <- list(glmnet_model=cvfit, lambda=lambda_param, alpha=alpha_param,
                       cvfit=cvfit, optimal_lambda=lambda_param, lambda_1se=cvfit$lambda.1se)
       } else {
         # Manual mode: use specified lambda and alpha parameters
         cat("Creating ElasticNet model with manual parameters: alpha=", alpha_param, ", lambda=", lambda_param, "\n")
-        fit <- glmnet(x, y, family="binomial", alpha=alpha_param, lambda=lambda_param)
+        fit <- glmnet(x, y, family=family_param, alpha=alpha_param, lambda=lambda_param)
         model <- list(glmnet_model=fit, lambda=lambda_param, alpha=alpha_param,
                       cvfit=NULL, optimal_lambda=lambda_param, lambda_1se=NULL)
       }
@@ -2403,36 +2504,52 @@ modelfunction <- function(learningmodel,
           x <- as.matrix(learningmodel[,-1])
           # Refit model with selected features
           if(is.null(modelparameters$lambda)){
-            cvfit <- cv.glmnet(x, y, family="binomial", alpha=alpha_param,
-                               type.measure="auc", nfolds=min(10, nrow(learningmodel)-1))
+            cvfit <- cv.glmnet(x, y, family=family_param, alpha=alpha_param,
+                               type.measure=type_measure_param, nfolds=min(10, nrow(learningmodel)-1))
             lambda_param <- cvfit$lambda.min
             # Refit model with optimal lambda to ensure we have a valid glmnet object
-            fit <- glmnet(x, y, family="binomial", alpha=alpha_param, lambda=lambda_param)
+            fit <- glmnet(x, y, family=family_param, alpha=alpha_param, lambda=lambda_param)
             cat("class of fitted modele :  ", class(fit))
             model <- list(glmnet_model=fit, lambda=lambda_param, alpha=alpha_param,
                           cvfit=cvfit, optimal_lambda=lambda_param, lambda_1se=cvfit$lambda.1se)
           } else {
-            fit <- glmnet(x, y, family="binomial", alpha=alpha_param, lambda=lambda_param)
+            fit <- glmnet(x, y, family=family_param, alpha=alpha_param, lambda=lambda_param)
             model <- list(glmnet_model=fit, lambda=lambda_param, alpha=alpha_param,
                           cvfit=NULL, optimal_lambda=lambda_param, lambda_1se=NULL)
           }
         }
       }
       
-      # Make predictions (probabilities)
+      # Make predictions (probabilities) - adapt to binary or multi-class
       # Use appropriate predict method based on model class
       if(inherits(model$glmnet_model, "cv.glmnet")){
-        scorelearning <- as.vector(glmnet:::predict.cv.glmnet(model$glmnet_model, newx=x, s=lambda_param, type="response"))
+        predictions_raw <- glmnet:::predict.cv.glmnet(model$glmnet_model, newx=x, s=lambda_param, type="response")
       } else {
-        scorelearning <- as.vector(glmnet::predict.glmnet(model$glmnet_model, newx=x, s=lambda_param, type="response"))
+        predictions_raw <- glmnet::predict.glmnet(model$glmnet_model, newx=x, s=lambda_param, type="response")
       }
-      scorelearning <- data.frame(scorelearning)
-      colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
-      
-      predictclasslearning<-factor(levels = lev)
-      predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
-      predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
-      predictclasslearning<-as.factor(predictclasslearning)
+
+      if(n_classes == 2){
+        # Binary: predictions_raw is a vector/matrix with 1 column
+        scorelearning <- data.frame(as.vector(predictions_raw))
+        colnames(scorelearning) <- paste(lev[1],"/",lev[2],sep="")
+
+        predictclasslearning<-factor(levels = lev)
+        predictclasslearning[which(scorelearning>=modelparameters$thresholdmodel)]<-lev["positif"]
+        predictclasslearning[which(scorelearning<modelparameters$thresholdmodel)]<-lev["negatif"]
+        predictclasslearning<-as.factor(predictclasslearning)
+      } else {
+        # Multi-class: predictions_raw is a 3D array (n_samples x n_classes x 1) for multinomial
+        # Extract the probability matrix
+        if(length(dim(predictions_raw)) == 3){
+          scorelearning <- predictions_raw[,,1]  # Extract matrix from 3D array
+        } else {
+          scorelearning <- predictions_raw  # Already a matrix
+        }
+        colnames(scorelearning) <- lev
+
+        # Predict using argmax (no threshold for multi-class)
+        predictclasslearning <- predict_from_scores(scorelearning, learningmodel[,1], threshold=NULL)
+      }
     }
 
     if(modelparameters$modeltype=="xgboost"){
