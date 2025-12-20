@@ -105,10 +105,10 @@ shinyUI(fluidPage(
         conditionalPanel(condition ="input.confirmdatabutton!=0",
                          hr(),
                          fluidRow(
-                           column(3,checkboxInput("invers", "inverse" , value = FALSE)),
-                           column(8,
-                                  p(textOutput("positif",inline=T),HTML( '&#x21D2;'), "case ",br(),
-                                    textOutput("negatif",inline=T),HTML( '&#x21D2;'), "control",align="center")
+                           column(12,
+                                  h4("Classes in dataset:"),
+                                  textOutput("class_summary"),
+                                  tags$head(tags$style("#class_summary{color: #007bff;font-size: 16px;font-weight: bold;}"))
                            )
                          ),
                          hr(),
