@@ -630,26 +630,28 @@ output$nbdiff<-renderText({
 })
 
 
-output$barplottest <- renderPlot({
-  learningdiff<<-TEST()$LEARNINGDIFF
-  useddata<<-TEST()$USEDDATA
-  if(nrow(learningdiff)!=0){barplottest(feature=useddata$names,logFC=useddata$logFC,levels=levels(learningdiff[,1]),pval=useddata$pval,mean1=useddata$mean1,mean2=useddata$mean2,thresholdpv=input$thresholdpv,
-                                             thresholdFC=input$thresholdFC,graph=T,maintitle="Mean by group for differentially expressed variables")
-}
-  else{errorplot(text = " No differently expressed ")}
-  
-})
-output$downloadbarplottest = downloadHandler(
-  filename = function() {paste('graph','.',input$paramdownplot, sep='')},
-  content = function(file) {
-    ggsave(file, plot = barplottest(feature=TEST()$USEDDATA$names,logFC=TEST()$USEDDATA$logFC,levels=levels(TEST()$LEARNINGDIFF[,1]),pval=TEST()$USEDDATA$pval,mean1=TEST()$USEDDATA$mean1,mean2=TEST()$USEDDATA$mean2,thresholdpv=input$thresholdpv,
-                                    thresholdFC=input$thresholdFC,graph=T,maintitle="Mean by group for differentially expressed variables"),  device = input$paramdownplot)},
-  contentType=NA)
-output$downloaddatabarplottest <- downloadHandler(
-  filename = function() { paste('dataset', '.',input$paramdowntable, sep='') },
-  content = function(file) {
-    downloaddataset(barplottest(feature=TEST()$USEDDATA$names,logFC=TEST()$USEDDATA$logFC,levels=levels(TEST()$LEARNINGDIFF[,1]),pval=TEST()$USEDDATA$pval,mean1=TEST()$USEDDATA$mean1,mean2=TEST()$USEDDATA$mean2,thresholdpv=input$thresholdpv,
-                                thresholdFC=input$thresholdFC,maintitle="Mean by group for differentially expressed variables",graph=F), file) })
+# REMOVED: barplottest() is binary-only (displays only 2 groups with mean1 and mean2)
+# For multi-class, use volcano plot or other visualizations
+# output$barplottest <- renderPlot({
+#   learningdiff<<-TEST()$LEARNINGDIFF
+#   useddata<<-TEST()$USEDDATA
+#   if(nrow(learningdiff)!=0){barplottest(feature=useddata$names,logFC=useddata$logFC,levels=levels(learningdiff[,1]),pval=useddata$pval,mean1=useddata$mean1,mean2=useddata$mean2,thresholdpv=input$thresholdpv,
+#                                              thresholdFC=input$thresholdFC,graph=T,maintitle="Mean by group for differentially expressed variables")
+# }
+#   else{errorplot(text = " No differently expressed ")}
+#
+# })
+# output$downloadbarplottest = downloadHandler(
+#   filename = function() {paste('graph','.',input$paramdownplot, sep='')},
+#   content = function(file) {
+#     ggsave(file, plot = barplottest(feature=TEST()$USEDDATA$names,logFC=TEST()$USEDDATA$logFC,levels=levels(TEST()$LEARNINGDIFF[,1]),pval=TEST()$USEDDATA$pval,mean1=TEST()$USEDDATA$mean1,mean2=TEST()$USEDDATA$mean2,thresholdpv=input$thresholdpv,
+#                                     thresholdFC=input$thresholdFC,graph=T,maintitle="Mean by group for differentially expressed variables"),  device = input$paramdownplot)},
+#   contentType=NA)
+# output$downloaddatabarplottest <- downloadHandler(
+#   filename = function() { paste('dataset', '.',input$paramdowntable, sep='') },
+#   content = function(file) {
+#     downloaddataset(barplottest(feature=TEST()$USEDDATA$names,logFC=TEST()$USEDDATA$logFC,levels=levels(TEST()$LEARNINGDIFF[,1]),pval=TEST()$USEDDATA$pval,mean1=TEST()$USEDDATA$mean1,mean2=TEST()$USEDDATA$mean2,thresholdpv=input$thresholdpv,
+#                                 thresholdFC=input$thresholdFC,maintitle="Mean by group for differentially expressed variables",graph=F), file) })
 
 # output$dataconditiontest=renderDataTable({
 #   hypothesistest<-TEST()$hypothesistest},options = list("orderClasses" = F,

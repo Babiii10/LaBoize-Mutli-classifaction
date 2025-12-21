@@ -178,7 +178,7 @@ shinyUI(fluidPage(
                                               ),
                                               column(5,radioButtons("selectmethod","Methods of selection ",c("selection on all samples"="nogroup","each group has more than x% of values "="bothgroups","at least one group has more than x% of more"="onegroup")),
                                                      conditionalPanel(condition ="input.help",helpText("3 ways of selection : select variables which got at least x% of values in all samples, "),
-                                                                      helpText("                select variables which which have more than x% in the two groups"),
+                                                                      helpText("                select variables which have more than x% in all groups"),
                                                                       helpText("                select variables which have at leat one group whith more than x% of values"))
                                               )
                                               

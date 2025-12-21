@@ -667,10 +667,13 @@ heatmapplot<-function(toto,ggplot=T,maintitle="Heatmap of the transform data ",s
 #############
 testfunction<-function(tabtransform,testparameters){
   #condition tests
-  if (testparameters$SFtest){
-    datatesthypothesis<-SFtest(tabtransform,shaptest=T,Ftest=T,threshold=0.05)
-  }
-  else{datatesthypothesis<-data.frame()}
+  # REMOVED: SFtest() is binary-only (tests normality and variance for exactly 2 groups)
+  # For multi-class, Kruskal-Wallis (non-parametric) and ANOVA (parametric) are used in diffexptest()
+  # if (testparameters$SFtest){
+  #   datatesthypothesis<-SFtest(tabtransform,shaptest=T,Ftest=T,threshold=0.05)
+  # }
+  # else{datatesthypothesis<-data.frame()}
+  datatesthypothesis<-data.frame()  # Empty dataframe for multi-class
 
   #diff test
   if(testparameters$test=="notest"){
@@ -699,11 +702,13 @@ testfunction<-function(tabtransform,testparameters){
       indvar<-(colnames(tabtransform)%in%selected_vars)
       indvar[1]<-T #keep the categorial variable
       tabdiff<<-tabtransform[,indvar]
+      # Note: mean1/mean2 set to NA for multi-class (barplottest() binary-only is disabled)
+      # For multi-class mean values, see datatest columns (mean_classX for each class)
       useddata<-data.frame("names"=datatest$name,
                            "coefficient"=datatest$coefficient,
                           "logFC"=datatest$logFoldChange,
-                          "mean1"=datatest$mean_group1,
-                          "mean2"=datatest$mean_group2)
+                          "mean1"=NA,
+                          "mean2"=NA)
     }
   }else if (testparameters$test=="clustEnet"){
     # Clustering + Elastic Net selection method
@@ -736,11 +741,13 @@ testfunction<-function(tabtransform,testparameters){
       indvar <- (colnames(tabtransform) %in% selected_vars)
       indvar[1] <- T #keep the categorial variable
       tabdiff<<-tabtransform[,indvar]
+      # Note: mean1/mean2 set to NA for multi-class (barplottest() binary-only is disabled)
+      # For multi-class mean values, see datatest columns (mean_classX for each class)
       useddata <- data.frame("names"=datatest$name,
                              "SelectionFrequency"=datatest$SelectionFrequency,
                              "logFC"=datatest$logFoldChange,
-                             "mean1"=datatest$mean_group1,
-                             "mean2"=datatest$mean_group2)
+                             "mean1"=NA,
+                             "mean2"=NA)
     }
   }
   else{
@@ -761,11 +768,14 @@ testfunction<-function(tabtransform,testparameters){
       indvar[1]<-T #keep the categorial variable
       tabdiff<<-tabtransform[,indvar]
     }
+    # Note: mean1/mean2 set to NA for multi-class (barplottest() binary-only is disabled)
+    # For multi-class mean values, see datatest columns (mean_classX for each class)
+    # datatest columns: 1=name, 2=pval, 3=adjustpval, 4=auc, 5=mean_overall, 6+=mean_classX
     useddata<-data.frame("names"=datatest[,1],
                          "pval"=pval,
-                         "logFC"=datatest[,5],
-                         "mean1"=datatest[,9],
-                         "mean2"=datatest[,10])
+                         "logFC"=datatest[,5],  # mean_overall (overall mean across all samples)
+                         "mean1"=NA,
+                         "mean2"=NA)
   }
   return(list("tabdiff"=tabdiff,
               "datatest"=datatest,
