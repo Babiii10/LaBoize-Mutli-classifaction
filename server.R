@@ -220,15 +220,30 @@ shinyServer(function(input, output,session) {
 #                  sensibility(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval,MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$predictclassval),
 #                  specificity(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval,MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$predictclassval)
 #       )
+      # Multi-class AUC and metrics
+      auc_learn <- calculate_multiclass_auc(MODEL()$DATALEARNINGMODEL$reslearningmodel$classlearning,
+                                            MODEL()$DATALEARNINGMODEL$reslearningmodel$scorelearning)
+      sens_learn <- sensibility(MODEL()$DATALEARNINGMODEL$reslearningmodel$predictclasslearning,
+                                MODEL()$DATALEARNINGMODEL$reslearningmodel$classlearning)
+      spec_learn <- specificity(MODEL()$DATALEARNINGMODEL$reslearningmodel$predictclasslearning,
+                                MODEL()$DATALEARNINGMODEL$reslearningmodel$classlearning)
+
       table[20,1:5]<-c("main results",dim(MODEL()$DATALEARNINGMODEL$learningmodel)[2]-1,
-                  round(as.numeric(auc(roc(MODEL()$DATALEARNINGMODEL$reslearningmodel$classlearning,MODEL()$DATALEARNINGMODEL$reslearningmodel$scorelearning))),digits = 3),
-                  sensibility(MODEL()$DATALEARNINGMODEL$reslearningmodel$predictclasslearning,MODEL()$DATALEARNINGMODEL$reslearningmodel$classlearning),
-                  specificity(MODEL()$DATALEARNINGMODEL$reslearningmodel$predictclasslearning,MODEL()$DATALEARNINGMODEL$reslearningmodel$classlearning)
+                  round(auc_learn$overall_auc, digits = 3),
+                  sens_learn$macro_average,
+                  spec_learn$macro_average
                   )
       if(input$adjustval){
-      table[20,6:8]<-c(round(as.numeric(auc(roc(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval,MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$scoreval))),digits = 3),
-                  sensibility(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$predictclassval,MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval),
-                  specificity(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$predictclassval,MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval)
+      auc_val <- calculate_multiclass_auc(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval,
+                                          MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$scoreval)
+      sens_val <- sensibility(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$predictclassval,
+                              MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval)
+      spec_val <- specificity(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$predictclassval,
+                              MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval)
+
+      table[20,6:8]<-c(round(auc_val$overall_auc, digits = 3),
+                  sens_val$macro_average,
+                  spec_val$macro_average
                   )
       }
     }
@@ -589,12 +604,7 @@ output$downloaddatastatistics<- downloadHandler(
     downloaddataset(TEST()$DATATEST, file)
   }
 )
-output$positif<-renderText({
-  res<-levels(DATA()$LEARNING[,1])[1]
-})
-output$negatif<-renderText({
-  res<-levels(DATA()$LEARNING[,1])[2]
-})
+
 output$volcanoplot <- renderPlot({
   datatest<<-TEST()$DATATEST
   useddata<<-TEST()$USEDDATA
@@ -1130,23 +1140,25 @@ output$downloaddatadecouvroc <- downloadHandler(
   content = function(file) {
     downloaddataset(ROCcurve(validation = datalearningmodel$reslearningmodel$classlearning,decisionvalues =  datalearningmodel$reslearningmodel$scorelearning,graph=F), file) })
 
-output$plotmodeldecouvbp <- renderPlot({
-  datalearningmodel<<-MODEL()$DATALEARNINGMODEL
-  scoremodelplot(class =datalearningmodel$reslearningmodel$classlearning ,score =datalearningmodel$reslearningmodel$scorelearning,names=rownames(datalearningmodel$reslearningmodel),
-                 threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = T,printnames=input$shownames1)
-})
-output$downloadplotmodeldecouvbp = downloadHandler(
-  filename = function() {paste('graph','.',input$paramdownplot, sep='')},
-  content = function(file) {
-    ggsave(file, plot =scoremodelplot(class =datalearningmodel$reslearningmodel$classlearning ,score =datalearningmodel$reslearningmodel$scorelearning,names=rownames(datalearningmodel$reslearningmodel),
-                                      threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = T),  device = input$paramdownplot)},
-  contentType=NA)
-
-output$downloaddatamodeldecouvbp <- downloadHandler(
-  filename = function() { paste('dataset', '.',input$paramdowntable, sep='') },
-  content = function(file) {
-    downloaddataset(   scoremodelplot(class =datalearningmodel$reslearningmodel$classlearning ,score =datalearningmodel$reslearningmodel$scorelearning,names=rownames(datalearningmodel$reslearningmodel),
-                                      threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = F), file) })
+# REMOVED: scoremodelplot is binary-only (uses threshold and TP/FP/TN/FN categorization)
+# For multi-class visualization, use ROC curves (One-vs-Rest) available in plotmodeldecouvROC
+# output$plotmodeldecouvbp <- renderPlot({
+#   datalearningmodel<<-MODEL()$DATALEARNINGMODEL
+#   scoremodelplot(class =datalearningmodel$reslearningmodel$classlearning ,score =datalearningmodel$reslearningmodel$scorelearning,names=rownames(datalearningmodel$reslearningmodel),
+#                  threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = T,printnames=input$shownames1)
+# })
+# output$downloadplotmodeldecouvbp = downloadHandler(
+#   filename = function() {paste('graph','.',input$paramdownplot, sep='')},
+#   content = function(file) {
+#     ggsave(file, plot =scoremodelplot(class =datalearningmodel$reslearningmodel$classlearning ,score =datalearningmodel$reslearningmodel$scorelearning,names=rownames(datalearningmodel$reslearningmodel),
+#                                       threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = T),  device = input$paramdownplot)},
+#   contentType=NA)
+#
+# output$downloaddatamodeldecouvbp <- downloadHandler(
+#   filename = function() { paste('dataset', '.',input$paramdowntable, sep='') },
+#   content = function(file) {
+#     downloaddataset(   scoremodelplot(class =datalearningmodel$reslearningmodel$classlearning ,score =datalearningmodel$reslearningmodel$scorelearning,names=rownames(datalearningmodel$reslearningmodel),
+#                                       threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = F), file) })
 output$nbselectmodel<-renderText({
   datalearningmodel<-MODEL()$DATALEARNINGMODEL
   ncol(datalearningmodel$learningmodel)-1
@@ -1159,12 +1171,14 @@ output$tabmodeldecouv<-renderTable({
 
 output$sensibilitydecouv<-renderText({
   datalearningmodel<-MODEL()$DATALEARNINGMODEL
-  sensibility(predict = datalearningmodel$reslearningmodel$predictclasslearning,class = datalearningmodel$reslearningmodel$classlearning)
+  sens <- sensibility(predict = datalearningmodel$reslearningmodel$predictclasslearning,class = datalearningmodel$reslearningmodel$classlearning)
+  sens$macro_average
 })
 
 output$specificitydecouv<-renderText({
   datalearningmodel<-MODEL()$DATALEARNINGMODEL
-  specificity(predict = datalearningmodel$reslearningmodel$predictclasslearning,class = datalearningmodel$reslearningmodel$classlearning )
+  spec <- specificity(predict = datalearningmodel$reslearningmodel$predictclasslearning,class = datalearningmodel$reslearningmodel$classlearning )
+  spec$macro_average
 })
 
 
@@ -1191,33 +1205,36 @@ output$downloaddatavalroc <- downloadHandler(
     downloaddataset(   ROCcurve(validation =  MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval,decisionvalues =  MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$scoreval,graph=F ), file) 
     })
 
-output$plotmodelvalbp <- renderPlot({
-  datavalidationmodel<-MODEL()$DATAVALIDATIONMODEL
-  scoremodelplot(class = datavalidationmodel$resvalidationmodel$classval ,score =datavalidationmodel$resvalidationmodel$scoreval,names=rownames(datavalidationmodel$resvalidationmodel),
-                 threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = T,printnames=input$shownames1)
-})
+# REMOVED: scoremodelplot is binary-only (uses threshold and TP/FP/TN/FN categorization)
+# For multi-class visualization, use ROC curves (One-vs-Rest) available in plotmodelvalroc
+# output$plotmodelvalbp <- renderPlot({
+#   datavalidationmodel<-MODEL()$DATAVALIDATIONMODEL
+#   scoremodelplot(class = datavalidationmodel$resvalidationmodel$classval ,score =datavalidationmodel$resvalidationmodel$scoreval,names=rownames(datavalidationmodel$resvalidationmodel),
+#                  threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = T,printnames=input$shownames1)
+# })
+#
+# output$downloadplotmodelvalbp = downloadHandler(
+#   filename = function() {paste('graph','.',input$paramdownplot, sep='')},
+#   content = function(file) {
+#     ggsave(file, plot =scoremodelplot(class = MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval ,score =MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$scoreval,names=rownames(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel),
+#                                       threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = T),  device = input$paramdownplot)},
+#   contentType=NA)
+#
+# output$downloaddatamodelvalbp <- downloadHandler(
+#   filename = function() { paste('dataset', '.',input$paramdowntable, sep='') },
+#   content = function(file) {
+#     downloaddataset(   scoremodelplot(class = MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval ,score =MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$scoreval,names=rownames(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel),
+#                                       threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = F), file) })
 
-output$downloadplotmodelvalbp = downloadHandler(
-  filename = function() {paste('graph','.',input$paramdownplot, sep='')},
-  content = function(file) {
-    ggsave(file, plot =scoremodelplot(class = MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval ,score =MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$scoreval,names=rownames(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel),
-                                      threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = T),  device = input$paramdownplot)},
-  contentType=NA)
-
-output$downloaddatamodelvalbp <- downloadHandler(
-  filename = function() { paste('dataset', '.',input$paramdowntable, sep='') },
-  content = function(file) {
-    downloaddataset(   scoremodelplot(class = MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval ,score =MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$scoreval,names=rownames(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel),
-                                      threshold =input$thresholdmodel ,type =input$plotscoremodel,graph = F), file) })
-
-output$youndenval<-renderTable({
-  datavalidationmodel<<-MODEL()$DATAVALIDATIONMODEL
-  resyounden<-younden(datavalidationmodel$resvalidationmodel$classval,datavalidationmodel$resvalidationmodel$scoreval )
-  resyounden<-data.frame(resyounden)
-  colnames(resyounden)<-c("")
-  rownames(resyounden)<-c("younden","sensibility younden","specificity younden","threshold younden")
-  resyounden
-},include.rownames=TRUE)
+# REMOVED: Youden threshold optimization is binary-only (not applicable for multi-class)
+# output$youndenval<-renderTable({
+#   datavalidationmodel<<-MODEL()$DATAVALIDATIONMODEL
+#   resyounden<-younden(datavalidationmodel$resvalidationmodel$classval,datavalidationmodel$resvalidationmodel$scoreval )
+#   resyounden<-data.frame(resyounden)
+#   colnames(resyounden)<-c("")
+#   rownames(resyounden)<-c("younden","sensibility younden","specificity younden","threshold younden")
+#   resyounden
+# },include.rownames=TRUE)
 
 output$tabmodelval<-renderTable({ 
   datavalidationmodel<-MODEL()$DATAVALIDATIONMODEL
@@ -1225,11 +1242,13 @@ output$tabmodelval<-renderTable({
 },include.rownames=TRUE)
 output$sensibilityval<-renderText({
   datavalidationmodel<-MODEL()$DATAVALIDATIONMODEL
-  sensibility(predict = datavalidationmodel$resvalidationmodel$predictclassval,class = datavalidationmodel$resvalidationmodel$classval)
+  sens <- sensibility(predict = datavalidationmodel$resvalidationmodel$predictclassval,class = datavalidationmodel$resvalidationmodel$classval)
+  sens$macro_average
 })
 output$specificityval<-renderText({
   datavalidationmodel<-MODEL()$DATAVALIDATIONMODEL
-  specificity(predict = datavalidationmodel$resvalidationmodel$predictclassval,class =  datavalidationmodel$resvalidationmodel$classval)
+  spec <- specificity(predict = datavalidationmodel$resvalidationmodel$predictclassval,class =  datavalidationmodel$resvalidationmodel$classval)
+  spec$macro_average
 })
 ####Detail of the model
 output$summarymodel<-renderPrint({

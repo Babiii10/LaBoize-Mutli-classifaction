@@ -1649,8 +1649,7 @@ modelfunction <- function(learningmodel,
       learningmodel[,1]<-factor(learningmodel[,1],levels = rev(levels(learningmodel[,1])),ordered = TRUE)
     }
     lev<-levels(x = learningmodel[,1])
-    names(lev)<-c("positif","negatif")
-    
+
     #Build model
     if (modelparameters$modeltype=="randomforest"){
       learningmodel<-as.data.frame(learningmodel[sort(rownames(learningmodel)),])
@@ -3340,127 +3339,10 @@ testparametersfunction<-function(learning,validation,tabparameters){
     else{
       
       resmodel<-out
-      
-      # Apply threshold optimization if requested
-      if(!is.null(parameters$threshold_method) && parameters$threshold_method != "fixed" && parameters$model != "nomodel"){
-        tryCatch({
-          # Calculate optimal threshold from ROC curve on learning data
-          classlearning <- resmodel$datalearningmodel$reslearningmodel$classlearning
-          scorelearning <- resmodel$datalearningmodel$reslearningmodel$scorelearning
-          
-          # Create ROC object
-          roc_obj <- roc(classlearning, scorelearning, quiet=TRUE)
-          
-          # Find optimal threshold based on selected method
-          if(parameters$threshold_method == "youden"){
-            # Youden method: maximizes sensitivity + specificity - 1
-            optimal_coords <- coords(roc_obj, "best", best.method="youden", ret=c("threshold", "sensitivity", "specificity"))
-            optimal_threshold <- optimal_coords$threshold
-            
-            # Display optimization results
-            cat(sprintf("    ✓ Youden optimization (iter %d): threshold=%.4f (sens=%.3f, spec=%.3f, Youden=%.3f)\n",
-                        i, optimal_threshold,
-                        optimal_coords$sensitivity,
-                        optimal_coords$specificity,
-                        optimal_coords$sensitivity + optimal_coords$specificity - 1))
-            
-          } else if(parameters$threshold_method == "equiprob"){
-            # Equiprobability method: closest point to diagonal (minimizes |FP-FN|)
-            optimal_coords <- coords(roc_obj, "best", best.method="closest.topleft", ret=c("threshold", "sensitivity", "specificity"))
-            optimal_threshold <- optimal_coords$threshold
-            
-            # Calculate false positive and false negative rates for display
-            fp_rate <- 1 - optimal_coords$specificity
-            fn_rate <- 1 - optimal_coords$sensitivity
-            
-            # Display optimization results
-            cat(sprintf("    ✓ Equiprobability optimization (iter %d): threshold=%.4f (sens=%.3f, spec=%.3f, FPR=%.3f, FNR=%.3f)\n",
-                        i, optimal_threshold,
-                        optimal_coords$sensitivity,
-                        optimal_coords$specificity,
-                        fp_rate, fn_rate))
-          }
-          
-          # Recalculate predicted classes using optimal threshold for learning data
-          # IMPORTANT: In this application, levels(classlearning)[1] = "positif" (case)
-          # Score represents probability of being positive, so high score → predict positive
-          # Therefore: score >= threshold → levels[1] (positif), score < threshold → levels[2] (negatif)
-          resmodel$datalearningmodel$reslearningmodel$predictclasslearning <- ifelse(scorelearning >= optimal_threshold, levels(classlearning)[1], levels(classlearning)[2])
-          resmodel$datalearningmodel$reslearningmodel$predictclasslearning <- factor(resmodel$datalearningmodel$reslearningmodel$predictclasslearning, levels = levels(classlearning))
-          
-          # If validation data exists, apply optimal threshold to validation predictions as well
-          # Same logic: high score → predict positive (level 1)
-          if(!is.null(validation)){
-            classval <- resmodel$datavalidationmodel$resvalidationmodel$classval
-            scoreval <- resmodel$datavalidationmodel$resvalidationmodel$scoreval
-            resmodel$datavalidationmodel$resvalidationmodel$predictclassval <- ifelse(scoreval >= optimal_threshold, levels(classval)[1], levels(classval)[2])
-            resmodel$datavalidationmodel$resvalidationmodel$predictclassval <- factor(resmodel$datavalidationmodel$resvalidationmodel$predictclassval, levels = levels(classval))
-          }
-          
-          # Update threshold in parameters for record
-          parameters$thresholdmodel <- optimal_threshold
-        }, error = function(e){
-          # If threshold optimization fails, continue with original threshold
-          cat(sprintf("    ✗ Threshold optimization FAILED (iteration %d): %s\n", i, e$message))
-          cat(sprintf("      → Keeping initial threshold: %.4f\n", parameters$thresholdmodel))
-          warning(paste("Threshold optimization failed:", e$message))
-        })
-      } else {
-        # For "fixed" threshold method, use the threshold from parameters (already set to 0.5 for proba, 0 for SVM)
-        # The classes are already predicted in modelfunction with this threshold
-        # No need to recalculate, just ensure threshold is recorded
-        if(parameters$model != "nomodel" && parameters$model != "svm"){
-          # For probabilistic models, threshold should be 0.5 (already set)
-          # For SVM, threshold is 0 (handled in modelfunction)
-          # Just ensure the threshold is recorded correctly
-          if(is.null(parameters$thresholdmodel) || is.na(parameters$thresholdmodel)){
-            parameters$thresholdmodel <- 0.5
-          }
-        }
-      }
-      
-      
-      # # Apply Youden threshold optimization if requested
-      # if(!is.null(parameters$optimize_threshold) && parameters$optimize_threshold && parameters$model != "nomodel"){
-      #   tryCatch({
-      #     # Calculate optimal threshold using Youden method from ROC curve on learning data
-      #     classlearning <- resmodel$datalearningmodel$reslearningmodel$classlearning
-      #     scorelearning <- resmodel$datalearningmodel$reslearningmodel$scorelearning
-      #     
-      #     # Create ROC object
-      #     roc_obj <- roc(classlearning, scorelearning, quiet=TRUE)
-      #     
-      #     # Find optimal threshold using Youden method (maximizes sensitivity + specificity - 1)
-      #     optimal_coords <- coords(roc_obj, "best", best.method="youden", ret=c("threshold", "sensitivity", "specificity"))
-      #     optimal_threshold <- optimal_coords$threshold
-      #     
-      #     # Recalculate predicted classes using optimal threshold for learning data
-      #     #resmodel$datalearningmodel$reslearningmodel$predictclasslearning <- ifelse(scorelearning >= optimal_threshold, levels(classlearning)[2], levels(classlearning)[1])
-      #     # IMPORTANT: In this application, levels(classlearning)[1] = "positif" (case)
-      #     # Score represents probability of being positive, so high score → predict positive
-      #     # Therefore: score >= threshold → levels[1] (positif), score < threshold → levels[2] (negatif)
-      #     resmodel$datalearningmodel$reslearningmodel$predictclasslearning <- ifelse(scorelearning >= optimal_threshold, levels(classlearning)[1], levels(classlearning)[2])
-      #     resmodel$datalearningmodel$reslearningmodel$predictclasslearning <- factor(resmodel$datalearningmodel$reslearningmodel$predictclasslearning, levels = levels(classlearning))
-      #     
-      #     # If validation data exists, apply optimal threshold to validation predictions as well
-      #     if(!is.null(validation)){
-      #       classval <- resmodel$datavalidationmodel$resvalidationmodel$classval
-      #       scoreval <- resmodel$datavalidationmodel$resvalidationmodel$scoreval
-      #       # resmodel$datavalidationmodel$resvalidationmodel$predictclassval <- ifelse(scoreval >= optimal_threshold, levels(classval)[2], levels(classval)[1])
-      #       resmodel$datavalidationmodel$resvalidationmodel$predictclassval <- ifelse(scoreval >= optimal_threshold, levels(classval)[1], levels(classval)[2])
-      #       resmodel$datavalidationmodel$resvalidationmodel$predictclassval <- factor(resmodel$datavalidationmodel$resvalidationmodel$predictclassval, levels = levels(classval))
-      #     }
-      #     
-      #     # Update threshold in parameters for record
-      #     parameters$thresholdmodel <- optimal_threshold
-      #   }, error = function(e){
-      #     # If threshold optimization fails, continue with original threshold
-      #     cat(sprintf("    ✗ Youden optimization FAILED (iteration %d): %s\n", i, e$message))
-      #     cat(sprintf("      → Keeping initial threshold: %.4f\n", parameters$thresholdmodel))
-      #     warning(paste("Threshold optimization failed:", e$message))
-      #   })
-      # }
-      
+
+      # Multi-class: predictions already made using argmax in modelfunction
+      # No threshold optimization needed for multi-class classification
+
     }
     }
     else{parameters$model<-"nomodel"}
@@ -3477,21 +3359,33 @@ testparametersfunction<-function(learning,validation,tabparameters){
     if(parameters$model!="nomodel"){
       # results[i,7]<-dim(resmodel$datalearningmodel$learningmodel)[2]-1
       results[i,8]<-dim(resmodel$datalearningmodel$learningmodel)[2]-1
-      #thresholdused (NEW: index 7)
-      results[i,7]<-round(parameters$thresholdmodel, digits = 4)
-      #auclearning
-      results[i,4]<-round(as.numeric(auc(roc(resmodel$datalearningmodel$reslearningmodel$classlearning,resmodel$datalearningmodel$reslearningmodel$scorelearning,quiet=T))),digits = 3)
-      #sensibilitylearning
-      results[i,5]<-sensibility(resmodel$datalearningmodel$reslearningmodel$predictclasslearning,resmodel$datalearningmodel$reslearningmodel$classlearning)
-      #specificitylearning
-      results[i,6]<-specificity(resmodel$datalearningmodel$reslearningmodel$predictclasslearning,resmodel$datalearningmodel$reslearningmodel$classlearning)
+      #thresholdused (NEW: index 7) - NA for multi-class (no threshold)
+      results[i,7]<-NA
+      #auclearning - Multi-class AUC
+      auc_learning <- calculate_multiclass_auc(resmodel$datalearningmodel$reslearningmodel$classlearning,
+                                               resmodel$datalearningmodel$reslearningmodel$scorelearning)
+      results[i,4]<-round(auc_learning$overall_auc, digits = 3)
+      #sensibilitylearning - Macro-average for multi-class
+      sens_learning <- sensibility(resmodel$datalearningmodel$reslearningmodel$predictclasslearning,
+                                    resmodel$datalearningmodel$reslearningmodel$classlearning)
+      results[i,5]<-sens_learning$macro_average
+      #specificitylearning - Macro-average for multi-class
+      spec_learning <- specificity(resmodel$datalearningmodel$reslearningmodel$predictclasslearning,
+                                    resmodel$datalearningmodel$reslearningmodel$classlearning)
+      results[i,6]<-spec_learning$macro_average
       if(!is.null(validation)){
-      #aucvalidation
-      results[i,1]<-round(as.numeric(auc(roc(resmodel$datavalidationmodel$resvalidationmodel$classval,resmodel$datavalidationmodel$resvalidationmodel$scoreval,quiet=T))),digits = 3)
-      #sensibilityvalidation
-      results[i,2]<-sensibility(resmodel$datavalidationmodel$resvalidationmodel$predictclassval,resmodel$datavalidationmodel$resvalidationmodel$classval)
-      #specificityvalidation
-      results[i,3]<-specificity(resmodel$datavalidationmodel$resvalidationmodel$predictclassval,resmodel$datavalidationmodel$resvalidationmodel$classval)
+      #aucvalidation - Multi-class AUC
+      auc_validation <- calculate_multiclass_auc(resmodel$datavalidationmodel$resvalidationmodel$classval,
+                                                  resmodel$datavalidationmodel$resvalidationmodel$scoreval)
+      results[i,1]<-round(auc_validation$overall_auc, digits = 3)
+      #sensibilityvalidation - Macro-average for multi-class
+      sens_validation <- sensibility(resmodel$datavalidationmodel$resvalidationmodel$predictclassval,
+                                      resmodel$datavalidationmodel$resvalidationmodel$classval)
+      results[i,2]<-sens_validation$macro_average
+      #specificityvalidation - Macro-average for multi-class
+      spec_validation <- specificity(resmodel$datavalidationmodel$resvalidationmodel$predictclassval,
+                                      resmodel$datavalidationmodel$resvalidationmodel$classval)
+      results[i,3]<-spec_validation$macro_average
     }
     }
   }
