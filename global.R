@@ -270,9 +270,9 @@ importfunction<-function(importparameters){
   previousparameters<-NULL
   validation<-NULL
   learning<-NULL
-  
+
   if(is.null(importparameters$learningfile)&is.null(importparameters$modelfile)){return()}
-  
+
   if(!is.null(importparameters$modelfile) ){
     load(file = importparameters$modelfile$datapath)
     previous<-state
@@ -283,7 +283,8 @@ importfunction<-function(importparameters){
   }
 
   if(!is.null(importparameters$learningfile)  ){
-    #if(importparameters$confirmdatabutton==0){
+    # Import raw data only if not already done or if confirmdatabutton is 0 (initial import)
+    if(importparameters$confirmdatabutton==0 || !exists("raw_learning_data", envir = .GlobalEnv)){
       datapath<- importparameters$learningfile$datapath
       #datapath <- input$learningfile$datapath
       #print(datapath)
@@ -295,16 +296,21 @@ importfunction<-function(importparameters){
       #            if(any(class(out)=="error")){tablearn<-data.frame()}
       #            else{tablearn<<-out}
       #            validate(need(ncol(tablearn)>1 & nrow(tablearn)>1,"problem import"))
-      
+
       learning<-transformdata(toto = learning,transpose=importparameters$transpose,zeroegalNA=importparameters$zeroegalNA)
-      
-    #}
+      # Save raw data for reuse
+      raw_learning_data <<- learning
+    } else {
+      # Reuse previously imported raw data
+      learning <- raw_learning_data
+    }
+
     if(importparameters$confirmdatabutton!=0){
       learning<-confirmdata(toto = learning)
       if(importparameters$invers){learning[,1]<-factor(learning[,1],levels = rev(levels(learning[,1])))}
-      
+
       #learning<-learning[-which(apply(X = learning,MARGIN=1,function(x){sum(is.na(x))})==ncol(learning)),]
-      
+
 #       lev<-levels(x = tablearn[,1])
 #       print(lev)
 #       names(lev)<-c("positif","negatif")
@@ -312,10 +318,11 @@ importfunction<-function(importparameters){
     # else{lev<-NULL}
   }
 
-  
+
   if(!is.null(importparameters$validationfile)  ){
-    
-    # if(importparameters$confirmdatabutton==0){
+
+    # Import raw data only if not already done or if confirmdatabutton is 0 (initial import)
+    if(importparameters$confirmdatabutton==0 || !exists("raw_validation_data", envir = .GlobalEnv)){
       datapathV<- importparameters$validationfile$datapath
       # out<<-tryCatch(
       validation<-importfile(datapath = datapathV,extension = importparameters$extension,
@@ -325,17 +332,21 @@ importfunction<-function(importparameters){
       #            else{tabval<<-out}
       #            validate(need(ncol(tabval)>1 & nrow(tabval)>1,"problem import"))
         validation<-transformdata(toto = validation,transpose=importparameters$transpose,zeroegalNA=importparameters$zeroegalNA)
-      
-      
-    # }
+        # Save raw data for reuse
+        raw_validation_data <<- validation
+    } else {
+      # Reuse previously imported raw data
+      validation <- raw_validation_data
+    }
+
     if(importparameters$confirmdatabutton!=0){
       validation<-confirmdata(toto = validation)
       if(importparameters$invers){validation[,1]<-factor(validation[,1],levels = rev(levels(validation[,1])))}
-      
+
       #validation<-validation[-which(apply(X = validation,MARGIN=1,function(x){sum(is.na(x))})==ncol(validation)),]
-        
+
     }
-    
+
   }
 
   res<-list("learning"=learning,"validation"=validation,previousparameters=previousparameters)#,"lev"=lev)
