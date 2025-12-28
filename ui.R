@@ -765,7 +765,7 @@ shinyUI(fluidPage(
                                                              )
                                             )
                                    ), # fin tabPanle : Model
-                                   ,
+                                   
                                    tabPanel("Test parameters", icon  =  icon("cog"),
                                             fluidRow(
                                               column(6,
