@@ -126,9 +126,13 @@ importfile<-function (datapath,extension,NAstring="NA",sheet=1,skiplines=0,dec="
   }
   if(extension=="xlsx"){
     options(warn=-1)
-    filerm<<-file.rename(datapath,paste(datapath, ".xlsx", sep=""))
+    # Check if file needs to be renamed (only if original file exists and renamed file doesn't)
+    xlsx_path <- paste(datapath, ".xlsx", sep="")
+    if(file.exists(datapath) && !file.exists(xlsx_path)){
+      filerm<<-file.rename(datapath, xlsx_path)
+    }
     options(warn=0)
-    toto <<- read_excel(paste(datapath, ".xlsx", sep=""),na=NAstring,col_names = F,skip = skiplines,sheet = sheet) %>% as.data.frame()
+    toto <<- read_excel(xlsx_path, na=NAstring, col_names = F, skip = skiplines, sheet = sheet) %>% as.data.frame()
     #toto <<- read_xlsx(paste(datapath, ".xlsx", sep=""),na=NAstring,col_names = F,skip = skiplines,sheet = sheet)
     #toto <-read.xlsx2(file = datapath,sheetIndex = sheet)
     #toto <-read_excel(datapath,na=NAstring,col_names = F,skip = skiplines,sheet = sheet)
