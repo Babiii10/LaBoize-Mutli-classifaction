@@ -33,7 +33,7 @@ shinyUI(fluidPage(
   # ),
   
   # Application title
-  titlePanel("Omics analysis"),
+  titlePanel("Multi-classification"),
   hr(nrow = 2),
   sidebarLayout(
     sidebarPanel(
