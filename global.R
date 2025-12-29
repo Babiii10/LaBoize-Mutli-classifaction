@@ -4049,3 +4049,39 @@ positive<-function(x){
 #'   ))
 #'   
 #' }
+
+# Fonctions à créer dans global.R :
+
+save_session_state <- function(session_data, session_name) {
+  # Sauvegarder :
+  # - Données importées
+  # - Paramètres de prétraitement
+  # - Features sélectionnées
+  # - Modèles entraînés
+  # - Résultats de validation
+  # - Paramètres utilisateur
+  
+  session_file <- paste0("sessions/", session_name, ".RData")
+  save(session_data, file=session_file)
+}
+
+load_session_state <- function(session_name) {
+  session_file <- paste0("sessions/", session_name, ".RData")
+  if(file.exists(session_file)) {
+    load(session_file)
+    return(session_data)
+  } else {
+    stop("Session not found")
+  }
+}
+
+list_saved_sessions <- function() {
+  session_files <- list.files("sessions/", pattern="\\.RData$")
+  return(gsub("\\.RData$", "", session_files))
+}
+
+
+
+
+
+                     
