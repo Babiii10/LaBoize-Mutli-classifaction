@@ -1167,11 +1167,11 @@ varselClust <- function(toto, n_clusters = 100, n_bootstrap = 500, alpha_enet = 
                         min_selection_freq = 0.5, preprocess = TRUE, min_patients = 20){
   
   withProgress(message = 'Sélection de variables en cours...', value = 0, {
-    
-    # Extract group and data
+
+    # Extract group and data - Multi-class compatible (works for 2+ classes)
     lev <- levels(toto[,1])
-    group <- ifelse(toto[,1] == lev[1], 1, 0)
-    y <- group
+    y <- toto[,1]  # Keep factor for multi-class (works for 2+ classes)
+    n_classes <- length(lev)
     data <- as.matrix(toto[,-1])
     
     # Optional preprocessing
@@ -1205,19 +1205,19 @@ varselClust <- function(toto, n_clusters = 100, n_bootstrap = 500, alpha_enet = 
     k <- min(n_clusters, ncol(data))
     clusters <- cutree(hc, k = k)
     
-    # Step 2: Select one variable per cluster using Wilcoxon test
+    # Step 2: Select one variable per cluster using Kruskal-Wallis test (multi-class)
     incProgress(0.05, detail = "Sélection par cluster...")
-    cat(sprintf("Step 2: Selecting one variable per cluster (Wilcoxon test)...\n"))
+    cat(sprintf("Step 2: Selecting one variable per cluster (Kruskal-Wallis test for %d classes)...\n", n_classes))
     selected_peptides <- c()
-    
+
     for (i in 1:k){
       cluster_peptides <- names(clusters[clusters == i])
-      
+
       if (length(cluster_peptides) > 1){
         p_values <- c()
         for (peptide in cluster_peptides){
           test_result <- tryCatch({
-            wilcox.test(data[, peptide] ~ y, exact = FALSE)
+            kruskal.test(data[, peptide] ~ y)
           }, error = function(e){
             list(p.value = 1)
           })
@@ -1252,19 +1252,34 @@ varselClust <- function(toto, n_clusters = 100, n_bootstrap = 500, alpha_enet = 
       bootstrap_indices <- sample(1:nrow(data_clust), replace = TRUE)
       X_bootstrap <- data_clust[bootstrap_indices, , drop=FALSE]
       y_bootstrap <- y[bootstrap_indices]
-      
+
       lasso_model <- tryCatch({
         cv.glmnet(as.matrix(X_bootstrap),
                   y_bootstrap,
-                  family = "binomial",
-                  alpha = alpha_enet)
+                  family = "multinomial",  # Multi-class (works for 2+ classes)
+                  alpha = alpha_enet,
+                  type.multinomial = "grouped")
       }, error = function(e){
         NULL
       })
-      
+
       if(!is.null(lasso_model)){
-        coef_lasso <- coef(lasso_model, s = "lambda.min")
-        selected_peptides_iter <- rownames(coef_lasso)[which(coef_lasso != 0)][-1]
+        # For multinomial, coef() returns a list of matrices (one per class)
+        coef_list <- coef(lasso_model, s = "lambda.min")
+
+        # Aggregate coefficients across classes (use max absolute value)
+        coef_aggregated <- rep(0, ncol(X_bootstrap))
+        names(coef_aggregated) <- colnames(X_bootstrap)
+
+        for(class_idx in 1:n_classes){
+          coef_matrix <- as.matrix(coef_list[[class_idx]])
+          coef_values_class <- coef_matrix[-1, 1]  # Remove intercept
+          # Keep maximum absolute coefficient across classes
+          coef_aggregated <- pmax(abs(coef_aggregated), abs(coef_values_class))
+        }
+
+        # Select non-zero coefficients
+        selected_peptides_iter <- names(coef_aggregated[coef_aggregated > 1e-10])
         selected_peptides_list[[b]] <- selected_peptides_iter
       }
     }
@@ -1329,39 +1344,40 @@ clustEnetSelection <- function(toto, n_clusters = 100, n_bootstrap = 500,
     ))
   }
   
-  # Calculate statistics for selected variables (similar to multivariateselection)
+  # Calculate statistics for selected variables - Multi-class compatible
   lev <- levels(toto[,1])
-  group <- ifelse(toto[,1] == lev[1], 1, 0)
+  n_classes <- length(lev)
   x <- as.matrix(toto[,-1])
-  
+
   # Get selection frequencies for selected variables
   freq_df <- clust_result$selection_frequencies
   freq_values <- freq_df$SelectionFrequency[match(selected_vars, freq_df$Variable)]
-  
-  # AUC for each selected variable
+
+  # Multi-class AUC for each selected variable
   auc_values <- sapply(selected_vars, function(var){
-    auc(roc(group, x[, var], quiet=TRUE))
+    tryCatch({
+      roc_obj <- multiclass.roc(toto[,1], x[, var], quiet=TRUE)
+      as.numeric(auc(roc_obj))
+    }, error = function(e) return(0.5))
   })
-  
-  # Mean values by group
-  mlev1 <- colMeans(x[which(group==0), selected_vars, drop=FALSE], na.rm=TRUE)
-  mlev2 <- colMeans(x[which(group==1), selected_vars, drop=FALSE], na.rm=TRUE)
-  
-  # Fold change
-  FC1o2 <- mlev1 / (mlev2 + 0.0001)
-  logFC1o2 <- log2(abs(FC1o2))
-  
+
+  # Mean values by group for each class
+  means_matrix <- matrix(nrow=length(selected_vars), ncol=n_classes)
+  for(j in 1:n_classes){
+    means_matrix[, j] <- colMeans(x[which(toto[,1] == lev[j]), selected_vars, drop=FALSE], na.rm=TRUE)
+  }
+  colnames(means_matrix) <- paste("mean", lev, sep="_")
+
   # Create results dataframe
   results <- data.frame(
     name = selected_vars,
     SelectionFrequency = freq_values,
-    AUC = auc_values,
-    FoldChange = FC1o2,
-    logFoldChange = logFC1o2,
-    mean_group1 = mlev1,
-    mean_group2 = mlev2,
+    AUC_multiclass = auc_values,
     stringsAsFactors = FALSE
   )
+
+  # Add means for each class
+  results <- cbind(results, means_matrix)
   
   # Sort by selection frequency
   results <- results[order(results$SelectionFrequency, decreasing=TRUE), ]
@@ -1719,7 +1735,7 @@ tune_knn_gridsearch <- function(X, y, param_grid = NULL, n_folds = 5, scoring = 
 #' @return List with best parameters and best score
 tune_elasticnet_gridsearch <- function(X, y, param_grid = NULL, n_folds = 5, scoring = c("accuracy", "auc")) {
   # library(superml)
-  
+
   # Default parameter grid if not provided
   if(is.null(param_grid)) {
     param_grid <- list(
@@ -1728,9 +1744,19 @@ tune_elasticnet_gridsearch <- function(X, y, param_grid = NULL, n_folds = 5, sco
       penalty = c("elasticnet")
     )
   }
-  
+
+  # Detect number of classes and set family accordingly (multi-class compatible)
+  if(is.factor(y)){
+    n_classes <- length(levels(y))
+  } else {
+    n_classes <- length(unique(y))
+  }
+
+  family_type <- if(n_classes == 2) "binomial" else "multinomial"
+  cat(sprintf("tune_elasticnet_gridsearch: Detected %d classes, using family='%s'\n", n_classes, family_type))
+
   # Create trainer object
-  lm_trainer <- LMTrainer$new(family = "binomial")
+  lm_trainer <- LMTrainer$new(family = family_type)
   
   # Create GridSearchCV object
   gst <- GridSearchCV$new(
