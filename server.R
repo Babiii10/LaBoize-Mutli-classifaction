@@ -1195,10 +1195,19 @@ output$plotmodeldecouvroc <- renderPlot({
 output$youndendecouv<-renderTable({
   datalearningmodel<<-MODEL()$DATALEARNINGMODEL
   resyounden<-younden(datalearningmodel$reslearningmodel$classlearning, datalearningmodel$reslearningmodel$scorelearning)
-  resyounden<-data.frame(resyounden)
-  colnames(resyounden)<-c("")
-  rownames(resyounden)<-c("younden","sensibility younden","specificity younden","threshold younden")
-  
+
+  # Check if Youden is available (not NA - binary classification only)
+  if(all(is.na(resyounden))){
+    # Multi-class case: Youden index not applicable
+    resyounden<-data.frame(Value = c("N/A (Multi-class)", "N/A (Multi-class)", "N/A (Multi-class)", "N/A (Multi-class)"))
+    rownames(resyounden)<-c("younden","sensibility younden","specificity younden","threshold younden")
+  } else {
+    # Binary classification case
+    resyounden<-data.frame(resyounden)
+    colnames(resyounden)<-c("")
+    rownames(resyounden)<-c("younden","sensibility younden","specificity younden","threshold younden")
+  }
+
   resyounden
 },include.rownames=TRUE)
  
