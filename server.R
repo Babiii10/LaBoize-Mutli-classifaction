@@ -276,26 +276,75 @@ shinyServer(function(input, output,session) {
     di2<-dim(x = DATA()$VALIDATION)[2]  
   })  
 
-  #si erreur envoyÃÂÃÂ© pb import
+#   #si erreur envoyÃÂÃÂ© pb import
+#   DATA<-reactive({
+#      # Require that either a learning file or a model file is uploaded before proceeding
+#      
+# 
+#      importparameters<<-list("learningfile"=input$learningfile,"validationfile"=input$validationfile,"modelfile"=input$modelfile,"extension" = input$filetype,
+#                             "NAstring"=input$NAstring,"sheetn"=input$sheetn,"skipn"=input$skipn,"dec"=input$dec,"sep"=input$sep,
+#                             "transpose"=input$transpose,"zeroegalNA"=input$zeroegalNA,confirmdatabutton=input$confirmdatabutton,invers=input$invers)
+# 
+#      out<-tryCatch(importfunction(importparameters),error=function(e) e )
+# #      if(any(class(out)=="error"))print("error")
+# #      else{resimport<-out}
+#      validate(need(any(class(out)!="error"),"error import"))
+#      resimport<<-out
+#       #resimport<-importfunction(importparameters)
+#     list(LEARNING=resimport$learning, 
+#          VALIDATION=resimport$validation,
+#         previousparameters=resimport$previousparameters  
+# #          LEVELS=resimport$lev
+#          )
+#   })
+#   
+  
+  
   DATA<-reactive({
-     # Require that either a learning file or a model file is uploaded before proceeding
-     
-
-     importparameters<<-list("learningfile"=input$learningfile,"validationfile"=input$validationfile,"modelfile"=input$modelfile,"extension" = input$filetype,
-                            "NAstring"=input$NAstring,"sheetn"=input$sheetn,"skipn"=input$skipn,"dec"=input$dec,"sep"=input$sep,
-                            "transpose"=input$transpose,"zeroegalNA"=input$zeroegalNA,confirmdatabutton=input$confirmdatabutton,invers=input$invers)
-
-     out<-tryCatch(importfunction(importparameters),error=function(e) e )
-#      if(any(class(out)=="error"))print("error")
-#      else{resimport<-out}
-     validate(need(any(class(out)!="error"),"error import"))
-     resimport<<-out
-      #resimport<-importfunction(importparameters)
+    cat("\n========== DATA() REACTIVE CALLED ==========\n")
+    cat("confirmdatabutton:", input$confirmdatabutton, "\n")
+    cat("learningfile is NULL:", is.null(input$learningfile), "\n")
+    if(!is.null(input$learningfile)) {
+      cat("learningfile name:", input$learningfile$name, "\n")
+      cat("learningfile datapath:", input$learningfile$datapath, "\n")
+    }
+    
+    importparameters<<-list("learningfile"=input$learningfile,
+                            "validationfile"=input$validationfile,
+                            "modelfile"=input$modelfile,
+                            "extension" = input$filetype,
+                            "NAstring"=input$NAstring,
+                            "sheetn"=input$sheetn,
+                            "skipn"=input$skipn,
+                            "dec"=input$dec,
+                            "sep"=input$sep,
+                            "transpose"=input$transpose,
+                            "zeroegalNA"=input$zeroegalNA,
+                            confirmdatabutton=input$confirmdatabutton,
+                            invers=input$invers)
+    
+    cat("Calling importfunction...\n")
+    out<-tryCatch(importfunction(importparameters),error=function(e) {
+      cat("ERROR in importfunction:", e$message, "\n")
+      return(e)
+    })
+    
+    cat("importfunction returned, class:", class(out), "\n")
+    
+    if(!is.null(out) && !inherits(out, "error")) {
+      cat("learning is NULL:", is.null(out$learning), "\n")
+      if(!is.null(out$learning)) {
+        cat("learning dimensions:", dim(out$learning), "\n")
+        cat("learning class col1:", class(out$learning[,1]), "\n")
+      }
+    }
+    
+    validate(need(any(class(out)!="error"),"error import"))
+    resimport<<-out
+    
     list(LEARNING=resimport$learning, 
          VALIDATION=resimport$validation,
-        previousparameters=resimport$previousparameters  
-#          LEVELS=resimport$lev
-         )
+         previousparameters=resimport$previousparameters)
   })
   
   output$JDDlearn=renderDataTable({
@@ -331,7 +380,12 @@ shinyServer(function(input, output,session) {
 
   # Display class summary
   output$class_summary <- renderText({
+    #req(DATA()$LEARNING)
+    req(input$confirmdatabutton != 0)
+    req(DATA())
     learning <- DATA()$LEARNING
+    cat("dim of learning data : \n")
+    print(dim(learning))
     validate(need(!is.null(learning), "No data loaded"))
     class_levels <- levels(learning[,1])
     paste(class_levels, collapse = ", ")
@@ -340,6 +394,8 @@ shinyServer(function(input, output,session) {
   # Display class count indicator
   output$class_count_indicator <- renderUI({
     learning <- DATA()$LEARNING
+    cat(" data of training in renderIU values count : \n")
+    print(dim(DATA()$LEARNING))
     validate(need(!is.null(learning), "No data loaded"))
     n_classes <- length(levels(learning[,1]))
 
@@ -359,6 +415,22 @@ shinyServer(function(input, output,session) {
     )
   })
 
+  observeEvent(input$confirmdatabutton, {
+    cat("\n=== CONFIRM BUTTON CLICKED ===\n")
+    cat("Button value:", input$confirmdatabutton, "\n")
+    
+    tryCatch({
+      learning <- DATA()$LEARNING
+      cat("Learning data dimensions:", dim(learning), "\n")
+      cat("Column 1 class:", class(learning[,1]), "\n")
+      cat("Column 1 is factor:", is.factor(learning[,1]), "\n")
+      if(is.factor(learning[,1])) {
+        cat("Levels:", levels(learning[,1]), "\n")
+      }
+    }, error = function(e) {
+      cat("ERROR in observeEvent:", e$message, "\n")
+    })
+  })
 
 #################
 SELECTDATA<-reactive({
