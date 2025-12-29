@@ -1978,6 +1978,216 @@ output$downloadplottestparametersboth = downloadHandler(
 #   
 # }
 
-}) 
+
+  ##########################
+  # SESSION MANAGEMENT LOGIC
+  ##########################
+
+  # Initialize sessions list on startup
+  observe({
+    sessions_list <- list_saved_sessions()
+    if(nrow(sessions_list) > 0) {
+      session_choices <- setNames(sessions_list$file, sessions_list$name)
+      updateSelectInput(session, "saved_sessions", choices = session_choices)
+    }
+  })
+
+  # Display sessions table
+  output$sessions_table <- renderDataTable({
+    # Refresh when button is clicked or on startup
+    input$refresh_sessions_btn
+
+    sessions_df <- list_saved_sessions()
+
+    if(nrow(sessions_df) > 0) {
+      # Format for display (remove full path)
+      display_df <- sessions_df[, c("name", "date", "size_mb")]
+      colnames(display_df) <- c("Session Name", "Saved Date", "Size (MB)")
+      return(display_df)
+    } else {
+      return(data.frame(
+        "Session Name" = character(0),
+        "Saved Date" = character(0),
+        "Size (MB)" = numeric(0),
+        stringsAsFactors = FALSE
+      ))
+    }
+  }, options = list(pageLength = 10, searching = TRUE, ordering = TRUE))
+
+  # Refresh sessions list
+  observeEvent(input$refresh_sessions_btn, {
+    sessions_list <- list_saved_sessions()
+    if(nrow(sessions_list) > 0) {
+      session_choices <- setNames(sessions_list$file, sessions_list$name)
+      updateSelectInput(session, "saved_sessions", choices = session_choices)
+      showNotification("Sessions list refreshed!", type = "message", duration = 2)
+    } else {
+      updateSelectInput(session, "saved_sessions", choices = NULL)
+      showNotification("No saved sessions found", type = "warning", duration = 2)
+    }
+  })
+
+  # Save session
+  observeEvent(input$save_session_btn, {
+    # Check if session name is valid
+    if(is.null(input$session_name) || input$session_name == "") {
+      showNotification("Please enter a session name", type = "error", duration = 3)
+      output$save_session_status <- renderText({ "Error: Session name cannot be empty" })
+      return()
+    }
+
+    tryCatch({
+      # Create session snapshot
+      session_data <- list(
+        # Data
+        data_imported = if(exists("dataimport")) dataimport() else NULL,
+        data_confirmed = if(exists("dataconfirm")) dataconfirm() else NULL,
+        data_transformed = if(exists("datatransf")) datatransf() else NULL,
+        data_selected = if(exists("dataselected")) dataselected() else NULL,
+
+        # Features and models
+        features_selected = if(exists("featureselected")) featureselected() else NULL,
+        model_results = if(exists("resmodel")) resmodel() else NULL,
+        validation_results = if(exists("resvalidationmodel")) resvalidationmodel() else NULL,
+
+        # Parameters
+        import_params = if(exists("importparameters")) importparameters else NULL,
+        select_params = if(exists("selectdataparameters")) selectdataparameters else NULL,
+        transform_params = if(exists("transformdataparameters")) transformdataparameters else NULL,
+        stats_params = if(exists("statsparameters")) statsparameters else NULL,
+        model_params = if(exists("modelparameters")) modelparameters() else NULL,
+
+        # Additional info
+        created_at = Sys.time(),
+        app_version = "1.0"
+      )
+
+      # Save session
+      success <- save_session_state(session_data, input$session_name)
+
+      if(success) {
+        showNotification("Session saved successfully!", type = "message", duration = 3)
+        output$save_session_status <- renderText({
+          paste("Session saved successfully at", format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+        })
+
+        # Refresh the sessions list
+        sessions_list <- list_saved_sessions()
+        if(nrow(sessions_list) > 0) {
+          session_choices <- setNames(sessions_list$file, sessions_list$name)
+          updateSelectInput(session, "saved_sessions", choices = session_choices)
+        }
+      } else {
+        showNotification("Failed to save session", type = "error", duration = 3)
+        output$save_session_status <- renderText({ "Error: Failed to save session" })
+      }
+
+    }, error = function(e) {
+      showNotification(paste("Error:", e$message), type = "error", duration = 5)
+      output$save_session_status <- renderText({ paste("Error:", e$message) })
+    })
+  })
+
+  # Load session
+  observeEvent(input$load_session_btn, {
+    if(is.null(input$saved_sessions) || input$saved_sessions == "") {
+      showNotification("Please select a session to load", type = "warning", duration = 3)
+      return()
+    }
+
+    tryCatch({
+      # Load session data
+      session_data <- load_session_state(input$saved_sessions)
+
+      if(is.null(session_data)) {
+        showNotification("Failed to load session", type = "error", duration = 3)
+        output$load_session_status <- renderText({ "Error: Failed to load session" })
+        return()
+      }
+
+      # Restore data
+      if(!is.null(session_data$data_imported)) {
+        dataimport(session_data$data_imported)
+      }
+      if(!is.null(session_data$data_confirmed)) {
+        dataconfirm(session_data$data_confirmed)
+      }
+      if(!is.null(session_data$data_transformed)) {
+        datatransf(session_data$data_transformed)
+      }
+      if(!is.null(session_data$data_selected)) {
+        dataselected(session_data$data_selected)
+      }
+
+      # Restore features and models
+      if(!is.null(session_data$features_selected)) {
+        featureselected(session_data$features_selected)
+      }
+      if(!is.null(session_data$model_results)) {
+        resmodel(session_data$model_results)
+      }
+      if(!is.null(session_data$validation_results)) {
+        resvalidationmodel(session_data$validation_results)
+      }
+
+      # Restore parameters
+      if(!is.null(session_data$import_params)) {
+        importparameters <<- session_data$import_params
+      }
+      if(!is.null(session_data$select_params)) {
+        selectdataparameters <<- session_data$select_params
+      }
+      if(!is.null(session_data$transform_params)) {
+        transformdataparameters <<- session_data$transform_params
+      }
+      if(!is.null(session_data$stats_params)) {
+        statsparameters <<- session_data$stats_params
+      }
+      if(!is.null(session_data$model_params)) {
+        modelparameters(session_data$model_params)
+      }
+
+      showNotification("Session loaded successfully!", type = "message", duration = 3)
+      output$load_session_status <- renderText({
+        paste("Session loaded successfully at", format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+      })
+
+    }, error = function(e) {
+      showNotification(paste("Error loading session:", e$message), type = "error", duration = 5)
+      output$load_session_status <- renderText({ paste("Error:", e$message) })
+    })
+  })
+
+  # Delete session
+  observeEvent(input$delete_session_btn, {
+    if(is.null(input$saved_sessions) || input$saved_sessions == "") {
+      showNotification("Please select a session to delete", type = "warning", duration = 3)
+      return()
+    }
+
+    tryCatch({
+      success <- delete_session(input$saved_sessions)
+
+      if(success) {
+        showNotification("Session deleted successfully!", type = "message", duration = 3)
+
+        # Refresh the sessions list
+        sessions_list <- list_saved_sessions()
+        if(nrow(sessions_list) > 0) {
+          session_choices <- setNames(sessions_list$file, sessions_list$name)
+          updateSelectInput(session, "saved_sessions", choices = session_choices)
+        } else {
+          updateSelectInput(session, "saved_sessions", choices = NULL)
+        }
+      } else {
+        showNotification("Failed to delete session", type = "error", duration = 3)
+      }
+
+    }, error = function(e) {
+      showNotification(paste("Error:", e$message), type = "error", duration = 5)
+    })
+  })
+
+})
 
 # 

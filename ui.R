@@ -33,7 +33,7 @@ shinyUI(fluidPage(
   # ),
   
   # Application title
-  titlePanel("Omics analysis"),
+  titlePanel("Multi-classification"),
   hr(nrow = 2),
   sidebarLayout(
     sidebarPanel(
@@ -765,29 +765,6 @@ shinyUI(fluidPage(
                                                              )
                                             )
                                    ), # fin tabPanle : Model
-                                   # À ajouter dans ui.R :
-
-tabPanel("Session Management",
-  fluidRow(
-    column(6,
-      h3("Sauvegarder la session actuelle"),
-      textInput("session_name", "Nom de la session", 
-                value=paste0("session_", format(Sys.time(), "%Y%m%d_%H%M%S"))),
-      actionButton("save_session_btn", "Sauvegarder session", 
-                   icon=icon("save"), class="btn-primary")
-    ),
-    column(6,
-      h3("Charger une session"),
-      selectInput("saved_sessions", "Sessions disponibles", 
-                  choices=NULL),
-      actionButton("load_session_btn", "Charger session", 
-                   icon=icon("folder-open"), class="btn-success"),
-      actionButton("refresh_sessions_btn", "Rafraîchir liste", 
-                   icon=icon("refresh"))
-    )
-  )
-)
-,
                                    
                                    tabPanel("Test parameters", icon  =  icon("cog"),
                                             fluidRow(
@@ -1050,10 +1027,82 @@ tabPanel("Session Management",
                                                      p(downloadButton("downloadplottestparameterslearning","Download plot"), align = 'center')
                                               )
                                             )
+                                   ),
+
+                                   # Session Management Tab
+                                   tabPanel("Session Management", icon = icon("save"),
+                                            fluidRow(
+                                              column(12,
+                                                     h2("Session Management"),
+                                                     hr()
+                                              )
+                                            ),
+                                            fluidRow(
+                                              # Save Session Section
+                                              column(6,
+                                                     wellPanel(
+                                                       h3("Save Current Session", icon("floppy-disk")),
+                                                       helpText("Save all your data, models, and settings to resume later"),
+                                                       textInput("session_name", "Session Name",
+                                                                 value = paste0("session_", format(Sys.time(), "%Y%m%d_%H%M%S")),
+                                                                 placeholder = "Enter a name for this session"),
+                                                       helpText("Session will be saved with timestamp in 'sessions/' folder"),
+                                                       actionButton("save_session_btn", "Save Session",
+                                                                    icon = icon("save"),
+                                                                    class = "btn-primary",
+                                                                    style = "background-color: #63BFBF; border-color: #63BFBF; color: white; width: 100%;"),
+                                                       br(), br(),
+                                                       textOutput("save_session_status")
+                                                     )
+                                              ),
+
+                                              # Load Session Section
+                                              column(6,
+                                                     wellPanel(
+                                                       h3("Load Previous Session", icon("folder-open")),
+                                                       helpText("Restore a previously saved session with all data and models"),
+                                                       selectInput("saved_sessions", "Available Sessions",
+                                                                   choices = NULL,
+                                                                   width = "100%"),
+                                                       fluidRow(
+                                                         column(6,
+                                                                actionButton("load_session_btn", "Load Session",
+                                                                             icon = icon("upload"),
+                                                                             class = "btn-success",
+                                                                             style = "background-color: #28a745; border-color: #28a745; color: white; width: 100%;")
+                                                         ),
+                                                         column(6,
+                                                                actionButton("refresh_sessions_btn", "Refresh List",
+                                                                             icon = icon("refresh"),
+                                                                             class = "btn-info",
+                                                                             style = "width: 100%;")
+                                                         )
+                                                       ),
+                                                       br(),
+                                                       actionButton("delete_session_btn", "Delete Selected Session",
+                                                                    icon = icon("trash"),
+                                                                    class = "btn-danger",
+                                                                    style = "width: 100%;"),
+                                                       br(), br(),
+                                                       textOutput("load_session_status")
+                                                     )
+                                              )
+                                            ),
+
+                                            # Session List Table
+                                            fluidRow(
+                                              column(12,
+                                                     h3("Saved Sessions"),
+                                                     hr(),
+                                                     dataTableOutput("sessions_table") %>% withSpinner(color = "#0dc5c1", type = 1),
+                                                     helpText("Sessions are saved in the 'sessions/' directory. Each session contains all your data, parameters, trained models, and results.")
+                                              )
+                                            )
                                    )
                        )
       )
     )
   )
+)
 )
 )

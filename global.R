@@ -4050,38 +4050,206 @@ positive<-function(x){
 #'   
 #' }
 
-# Fonctions à créer dans global.R :
 
+##########################
+# Session Management Functions
+##########################
+
+#' Save complete session state to file
+#'
+#' Saves all relevant data, parameters, models, and results to an RData file
+#' for later restoration. Creates a sessions directory if it doesn't exist.
+#'
+#' @param session_data List containing all session variables to save
+#' @param session_name Character string for the session name
+#' @return Boolean indicating success/failure
+#' @export
 save_session_state <- function(session_data, session_name) {
-  # Sauvegarder :
-  # - Données importées
-  # - Paramètres de prétraitement
-  # - Features sélectionnées
-  # - Modèles entraînés
-  # - Résultats de validation
-  # - Paramètres utilisateur
-  
-  session_file <- paste0("sessions/", session_name, ".RData")
-  save(session_data, file=session_file)
+  tryCatch({
+    # Create sessions directory if it doesn't exist
+    sessions_dir <- "sessions"
+    if(!dir.exists(sessions_dir)) {
+      dir.create(sessions_dir, recursive = TRUE)
+    }
+    
+    # Clean session name (remove invalid characters)
+    session_name <- gsub("[^a-zA-Z0-9_-]", "_", session_name)
+    
+    # Create filename with timestamp
+    timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+    session_file <- file.path(sessions_dir, paste0(session_name, "_", timestamp, ".RData"))
+    
+    # Add metadata to session data
+    session_data$metadata <- list(
+      saved_at = Sys.time(),
+      session_name = session_name,
+      r_version = R.version.string,
+      platform = R.version$platform
+    )
+    
+    # Save to file
+    save(session_data, file = session_file)
+    
+    message(paste("Session saved successfully to:", session_file))
+    return(TRUE)
+    
+  }, error = function(e) {
+    warning(paste("Failed to save session:", e$message))
+    return(FALSE)
+  })
 }
 
-load_session_state <- function(session_name) {
-  session_file <- paste0("sessions/", session_name, ".RData")
-  if(file.exists(session_file)) {
-    load(session_file)
+
+#' Load session state from file
+#'
+#' Loads a previously saved session from an RData file
+#'
+#' @param session_file Character string for the session file path
+#' @return List containing all session variables, or NULL if failed
+#' @export
+load_session_state <- function(session_file) {
+  tryCatch({
+    if(!file.exists(session_file)) {
+      warning(paste("Session file not found:", session_file))
+      return(NULL)
+    }
+    
+    # Load the session data
+    env <- new.env()
+    load(session_file, envir = env)
+    
+    if(!exists("session_data", envir = env)) {
+      warning("Invalid session file: session_data not found")
+      return(NULL)
+    }
+    
+    session_data <- env$session_data
+    
+    # Check metadata
+    if(!is.null(session_data$metadata)) {
+      message(paste("Loading session:", session_data$metadata$session_name))
+      message(paste("Saved at:", session_data$metadata$saved_at))
+    }
+    
     return(session_data)
-  } else {
-    stop("Session not found")
-  }
+    
+  }, error = function(e) {
+    warning(paste("Failed to load session:", e$message))
+    return(NULL)
+  })
 }
 
+
+#' List all saved sessions
+#'
+#' Returns a data frame with information about all saved sessions
+#'
+#' @return Data frame with session information (name, file, date, size)
+#' @export
 list_saved_sessions <- function() {
-  session_files <- list.files("sessions/", pattern="\\.RData$")
-  return(gsub("\\.RData$", "", session_files))
+  sessions_dir <- "sessions"
+  
+  if(!dir.exists(sessions_dir)) {
+    return(data.frame(
+      name = character(0),
+      file = character(0),
+      date = character(0),
+      size_mb = numeric(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  session_files <- list.files(sessions_dir, pattern = "\\.RData$", full.names = TRUE)
+  
+  if(length(session_files) == 0) {
+    return(data.frame(
+      name = character(0),
+      file = character(0),
+      date = character(0),
+      size_mb = numeric(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+  
+  # Get file info
+  file_info <- file.info(session_files)
+  
+  sessions_df <- data.frame(
+    name = basename(session_files),
+    file = session_files,
+    date = format(file_info$mtime, "%Y-%m-%d %H:%M:%S"),
+    size_mb = round(file_info$size / 1024^2, 2),
+    stringsAsFactors = FALSE
+  )
+  
+  # Sort by date (most recent first)
+  sessions_df <- sessions_df[order(file_info$mtime, decreasing = TRUE), ]
+  
+  return(sessions_df)
 }
 
 
+#' Delete a saved session
+#'
+#' Removes a session file from the sessions directory
+#'
+#' @param session_file Character string for the session file path
+#' @return Boolean indicating success/failure
+#' @export
+delete_session <- function(session_file) {
+  tryCatch({
+    if(!file.exists(session_file)) {
+      warning(paste("Session file not found:", session_file))
+      return(FALSE)
+    }
+    
+    # Delete the file
+    file.remove(session_file)
+    message(paste("Session deleted:", session_file))
+    return(TRUE)
+    
+  }, error = function(e) {
+    warning(paste("Failed to delete session:", e$message))
+    return(FALSE)
+  })
+}
 
 
-
-                     
+#' Create a session snapshot
+#'
+#' Helper function to package current application state into a saveable list
+#'
+#' @param data_imported Imported data
+#' @param data_confirmed Confirmed/validated data
+#' @param data_transformed Transformed data
+#' @param features_selected Selected features
+#' @param model_results Model training results
+#' @param validation_results Validation results
+#' @param user_params List of user input parameters
+#' @return List ready to be saved
+#' @export
+create_session_snapshot <- function(
+  data_imported = NULL,
+  data_confirmed = NULL,
+  data_transformed = NULL,
+  features_selected = NULL,
+  model_results = NULL,
+  validation_results = NULL,
+  user_params = NULL
+) {
+  
+  snapshot <- list(
+    data = list(
+      imported = data_imported,
+      confirmed = data_confirmed,
+      transformed = data_transformed
+    ),
+    features = features_selected,
+    models = model_results,
+    validation = validation_results,
+    parameters = user_params,
+    created_at = Sys.time()
+  )
+  
+  return(snapshot)
+}
