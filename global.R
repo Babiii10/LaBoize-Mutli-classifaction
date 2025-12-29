@@ -259,8 +259,11 @@ toto<-as.data.frame(toto[,c(colnames(toto)[1],sort(colnames(toto)[-1]))])
 confirmdata<-function(toto){
   toto<-as.data.frame(toto)
   toto[,1]<-as.factor(as.character(toto[,1]))
-  for (i in 2:ncol(toto)){
-    toto[,i]<-as.numeric(as.character(toto[,i]))
+  # Only convert additional columns if there are more than 1 column
+  if(ncol(toto) > 1){
+    for (i in 2:ncol(toto)){
+      toto[,i]<-as.numeric(as.character(toto[,i]))
+    }
   }
   return(toto)
 }
@@ -886,11 +889,20 @@ younden<-function(response,predictor){
   # Check if response has more than 2 levels (multi-class)
   n_levels <- length(levels(as.factor(response)))
 
-  # Check if predictor is a matrix (multi-class scores)
-  if(is.matrix(predictor) || n_levels > 2){
+  # Check if predictor is a matrix or data.frame with multiple columns (multi-class scores)
+  is_multicolumn <- (is.matrix(predictor) && ncol(predictor) > 1) ||
+                    (is.data.frame(predictor) && ncol(predictor) > 1) ||
+                    (!is.atomic(predictor) && length(dim(predictor)) > 1)
+
+  if(is_multicolumn || n_levels > 2){
     # Multi-class case: Youden index not directly applicable
     # Return NA values with informative message
     return(c(NA, NA, NA, NA))
+  }
+
+  # Ensure predictor is a vector for binary classification
+  if(is.matrix(predictor) || is.data.frame(predictor)){
+    predictor <- as.vector(predictor)
   }
 
   # Binary classification case
