@@ -883,6 +883,17 @@ diffexptest<-function(toto,test="Wtest"){
 }
 
 younden<-function(response,predictor){
+  # Check if response has more than 2 levels (multi-class)
+  n_levels <- length(levels(as.factor(response)))
+
+  # Check if predictor is a matrix (multi-class scores)
+  if(is.matrix(predictor) || n_levels > 2){
+    # Multi-class case: Youden index not directly applicable
+    # Return NA values with informative message
+    return(c(NA, NA, NA, NA))
+  }
+
+  # Binary classification case
   res<-roc(response,predictor,quiet=T)
   youndenscore<-res$sensitivities+res$specificities-1
   best<-which(youndenscore==max(youndenscore))[1] # Only the first best is kept
@@ -1190,25 +1201,45 @@ clustEnetSelection <- function(toto, n_clusters = 100, n_bootstrap = 500,
   
   # Calculate statistics for selected variables (similar to multivariateselection)
   lev <- levels(toto[,1])
-  group <- ifelse(toto[,1] == lev[1], 1, 0)
+  n_levels <- length(lev)
   x <- as.matrix(toto[,-1])
-  
+
   # Get selection frequencies for selected variables
   freq_df <- clust_result$selection_frequencies
   freq_values <- freq_df$SelectionFrequency[match(selected_vars, freq_df$Variable)]
-  
-  # AUC for each selected variable
-  auc_values <- sapply(selected_vars, function(var){
-    auc(roc(group, x[, var], quiet=TRUE))
-  })
-  
-  # Mean values by group
-  mlev1 <- colMeans(x[which(group==0), selected_vars, drop=FALSE], na.rm=TRUE)
-  mlev2 <- colMeans(x[which(group==1), selected_vars, drop=FALSE], na.rm=TRUE)
-  
-  # Fold change
-  FC1o2 <- mlev1 / (mlev2 + 0.0001)
-  logFC1o2 <- log2(abs(FC1o2))
+
+  # AUC for each selected variable - handle multi-class case
+  if(n_levels == 2){
+    # Binary classification: use standard ROC AUC
+    group <- ifelse(toto[,1] == lev[1], 1, 0)
+    auc_values <- sapply(selected_vars, function(var){
+      auc(roc(group, x[, var], quiet=TRUE))
+    })
+
+    # Mean values by group
+    mlev1 <- colMeans(x[which(group==0), selected_vars, drop=FALSE], na.rm=TRUE)
+    mlev2 <- colMeans(x[which(group==1), selected_vars, drop=FALSE], na.rm=TRUE)
+
+    # Fold change
+    FC1o2 <- mlev1 / (mlev2 + 0.0001)
+    logFC1o2 <- log2(abs(FC1o2))
+  } else {
+    # Multi-class: use multiclass.roc for overall AUC
+    auc_values <- sapply(selected_vars, function(var){
+      tryCatch({
+        roc_obj <- multiclass.roc(toto[,1], x[, var], quiet=TRUE)
+        auc(roc_obj)
+      }, error = function(e) NA)
+    })
+
+    # For multi-class, calculate mean per class (not fold change)
+    mlev1 <- colMeans(x[toto[,1] == lev[1], selected_vars, drop=FALSE], na.rm=TRUE)
+    mlev2 <- colMeans(x[toto[,1] == lev[2], selected_vars, drop=FALSE], na.rm=TRUE)
+
+    # Set fold change to NA for multi-class (not applicable)
+    FC1o2 <- rep(NA, length(selected_vars))
+    logFC1o2 <- rep(NA, length(selected_vars))
+  }
   
   # Create results dataframe
   results <- data.frame(
