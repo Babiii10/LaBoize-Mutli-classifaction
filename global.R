@@ -285,11 +285,13 @@ confirmdata<-function(toto){
   }
   
   toto[,1]<-as.factor(as.character(toto[,1]))
-  # Only convert additional columns if there are more than 1 column
-  if(ncol(toto) > 1){
+  cat("Column 1 converted to factor, levels:", levels(toto[,1]), "\n")
+  
+  if(ncol(toto) >= 2) {
     for (i in 2:ncol(toto)){
       toto[,i]<-as.numeric(as.character(toto[,i]))
     }
+    cat("Numeric conversion complete\n")
   }
   
   cat("Returning from confirmdata, dim:", dim(toto), "\n")
@@ -439,9 +441,55 @@ importfunction<-function(importparameters){
       }
     }
   }
+
+  # if(!is.null(importparameters$validationfile)){
+  #   cat("\n>>> Processing validationfile...\n")
+  #   datapathV<- importparameters$validationfile$datapath
+  #   cat("validation datapath:", datapathV, "\n")
+  #   
+  #   cat(">>> Calling importfile for validation...\n")
+  #   validation<-importfile(datapath = datapathV,
+  #                          extension = importparameters$extension,
+  #                          NAstring=importparameters$NAstring,
+  #                          sheet=importparameters$sheetn,
+  #                          skiplines=importparameters$skipn,
+  #                          dec=importparameters$dec,
+  #                          sep=importparameters$sep)
+  #   cat("After importfile: validation is NULL =", is.null(validation), "\n")
+  #   if(!is.null(validation)) cat("After importfile: dim =", dim(validation), "\n")
+  #   
+  #   cat(">>> Calling transformdata for validation...\n")
+  #   validation<-transformdata(toto = validation,
+  #                             transpose=importparameters$transpose,
+  #                             zeroegalNA=importparameters$zeroegalNA)
+  #   cat("After transformdata: validation is NULL =", is.null(validation), "\n")
+  #   if(!is.null(validation)) cat("After transformdata: dim =", dim(validation), "\n")
+  #   
+  #   if(importparameters$confirmdatabutton!=0){
+  #     cat(">>> Calling confirmdata for validation (button pressed)...\n")
+  #     cat("Before confirmdata: dim =", dim(validation), "\n")
+  #     
+  #     validation<-confirmdata(toto = validation)
+  #     
+  #     cat("After confirmdata: validation is NULL =", is.null(validation), "\n")
+  #     if(!is.null(validation)) {
+  #       cat("After confirmdata: dim =", dim(validation), "\n")
+  #       cat("After confirmdata: class col1 =", class(validation[,1]), "\n")
+  #     } else {
+  #       cat("!!! confirmdata returned NULL for validation !!!\n")
+  #     }
+  #     
+  #     # if(importparameters$invers){
+  #     #   validation[,1]<-factor(validation[,1],levels = rev(levels(validation[,1])))
+  #     # }
+  #   }
+  # } else {
+  #   cat("\n>>> NO VALIDATION FILE uploaded\n")
+  # }
   
   cat("========== RETURNING FROM IMPORTFUNCTION ==========\n")
   cat("Final learning is NULL:", is.null(learning), "\n")
+  cat("Final validation is NULL:", is.null(validation), "\n") 
   
   res<-list("learning"=learning,"validation"=validation,previousparameters=previousparameters)
   return(res)
@@ -976,26 +1024,6 @@ diffexptest<-function(toto,test="Wtest"){
 }
 
 younden<-function(response,predictor){
-  # Check if response has more than 2 levels (multi-class)
-  n_levels <- length(levels(as.factor(response)))
-
-  # Check if predictor is a matrix or data.frame with multiple columns (multi-class scores)
-  is_multicolumn <- (is.matrix(predictor) && ncol(predictor) > 1) ||
-                    (is.data.frame(predictor) && ncol(predictor) > 1) ||
-                    (!is.atomic(predictor) && length(dim(predictor)) > 1)
-
-  if(is_multicolumn || n_levels > 2){
-    # Multi-class case: Youden index not directly applicable
-    # Return NA values with informative message
-    return(c(NA, NA, NA, NA))
-  }
-
-  # Ensure predictor is a vector for binary classification
-  if(is.matrix(predictor) || is.data.frame(predictor)){
-    predictor <- as.vector(predictor)
-  }
-
-  # Binary classification case
   res<-roc(response,predictor,quiet=T)
   youndenscore<-res$sensitivities+res$specificities-1
   best<-which(youndenscore==max(youndenscore))[1] # Only the first best is kept
@@ -1303,45 +1331,25 @@ clustEnetSelection <- function(toto, n_clusters = 100, n_bootstrap = 500,
   
   # Calculate statistics for selected variables (similar to multivariateselection)
   lev <- levels(toto[,1])
-  n_levels <- length(lev)
+  group <- ifelse(toto[,1] == lev[1], 1, 0)
   x <- as.matrix(toto[,-1])
-
+  
   # Get selection frequencies for selected variables
   freq_df <- clust_result$selection_frequencies
   freq_values <- freq_df$SelectionFrequency[match(selected_vars, freq_df$Variable)]
-
-  # AUC for each selected variable - handle multi-class case
-  if(n_levels == 2){
-    # Binary classification: use standard ROC AUC
-    group <- ifelse(toto[,1] == lev[1], 1, 0)
-    auc_values <- sapply(selected_vars, function(var){
-      auc(roc(group, x[, var], quiet=TRUE))
-    })
-
-    # Mean values by group
-    mlev1 <- colMeans(x[which(group==0), selected_vars, drop=FALSE], na.rm=TRUE)
-    mlev2 <- colMeans(x[which(group==1), selected_vars, drop=FALSE], na.rm=TRUE)
-
-    # Fold change
-    FC1o2 <- mlev1 / (mlev2 + 0.0001)
-    logFC1o2 <- log2(abs(FC1o2))
-  } else {
-    # Multi-class: use multiclass.roc for overall AUC
-    auc_values <- sapply(selected_vars, function(var){
-      tryCatch({
-        roc_obj <- multiclass.roc(toto[,1], x[, var], quiet=TRUE)
-        auc(roc_obj)
-      }, error = function(e) NA)
-    })
-
-    # For multi-class, calculate mean per class (not fold change)
-    mlev1 <- colMeans(x[toto[,1] == lev[1], selected_vars, drop=FALSE], na.rm=TRUE)
-    mlev2 <- colMeans(x[toto[,1] == lev[2], selected_vars, drop=FALSE], na.rm=TRUE)
-
-    # Set fold change to NA for multi-class (not applicable)
-    FC1o2 <- rep(NA, length(selected_vars))
-    logFC1o2 <- rep(NA, length(selected_vars))
-  }
+  
+  # AUC for each selected variable
+  auc_values <- sapply(selected_vars, function(var){
+    auc(roc(group, x[, var], quiet=TRUE))
+  })
+  
+  # Mean values by group
+  mlev1 <- colMeans(x[which(group==0), selected_vars, drop=FALSE], na.rm=TRUE)
+  mlev2 <- colMeans(x[which(group==1), selected_vars, drop=FALSE], na.rm=TRUE)
+  
+  # Fold change
+  FC1o2 <- mlev1 / (mlev2 + 0.0001)
+  logFC1o2 <- log2(abs(FC1o2))
   
   # Create results dataframe
   results <- data.frame(
@@ -1803,9 +1811,9 @@ modelfunction <- function(learningmodel,
   if(modelparameters$modeltype!="nomodel"){
     colnames(learningmodel)[1]<-"group"
     
-    if(modelparameters$invers){
-      learningmodel[,1]<-factor(learningmodel[,1],levels = rev(levels(learningmodel[,1])),ordered = TRUE)
-    }
+    # if(modelparameters$invers){
+    #   learningmodel[,1]<-factor(learningmodel[,1],levels = rev(levels(learningmodel[,1])),ordered = TRUE)
+    # }
     lev<-levels(x = learningmodel[,1])
     
     #Build model
