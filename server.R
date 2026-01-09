@@ -226,6 +226,9 @@ shinyServer(function(input, output,session) {
 #                  specificity(MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$classval,MODEL()$DATAVALIDATIONMODEL$resvalidationmodel$predictclassval)
 #       )
       # Multi-class AUC and metrics
+      cat("Un regard sur les scores : \n")
+      print(str(MODEL()$DATALEARNINGMODEL$reslearningmodel$scorelearning))
+      print(dim(MODEL()$DATALEARNINGMODEL$reslearningmodel$scorelearning))
       auc_learn <- calculate_multiclass_auc(MODEL()$DATALEARNINGMODEL$reslearningmodel$classlearning,
                                             MODEL()$DATALEARNINGMODEL$reslearningmodel$scorelearning)
       sens_learn <- sensibility(MODEL()$DATALEARNINGMODEL$reslearningmodel$predictclasslearning,
