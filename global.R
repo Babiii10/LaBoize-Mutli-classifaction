@@ -126,13 +126,9 @@ importfile<-function (datapath,extension,NAstring="NA",sheet=1,skiplines=0,dec="
   }
   if(extension=="xlsx"){
     options(warn=-1)
-    # Check if file needs to be renamed (only if original file exists and renamed file doesn't)
-    xlsx_path <- paste(datapath, ".xlsx", sep="")
-    if(file.exists(datapath) && !file.exists(xlsx_path)){
-      filerm<<-file.rename(datapath, xlsx_path)
-    }
+    filerm<<-file.rename(datapath,paste(datapath, ".xlsx", sep=""))
     options(warn=0)
-    toto <<- read_excel(xlsx_path, na=NAstring, col_names = F, skip = skiplines, sheet = sheet) %>% as.data.frame()
+    toto <<- read_excel(paste(datapath, ".xlsx", sep=""),na=NAstring,col_names = F,skip = skiplines,sheet = sheet) %>% as.data.frame()
     #toto <<- read_xlsx(paste(datapath, ".xlsx", sep=""),na=NAstring,col_names = F,skip = skiplines,sheet = sheet)
     #toto <-read.xlsx2(file = datapath,sheetIndex = sheet)
     #toto <-read_excel(datapath,na=NAstring,col_names = F,skip = skiplines,sheet = sheet)
@@ -151,7 +147,7 @@ importfile<-function (datapath,extension,NAstring="NA",sheet=1,skiplines=0,dec="
   toto<-toto[-1,]
   row.names(toto)<-rnames[-1]
   colnames(toto)<-cnames[-1]
-  
+
   toto<-as.data.frame(toto)
   rownames(toto)<-rnames[-1]
   colnames(toto)<-cnames[-1]
@@ -389,109 +385,80 @@ confirmdata<-function(toto){
 # }
 
 importfunction<-function(importparameters){
-  cat("\n========== IMPORTFUNCTION CALLED ==========\n")
-  cat("learningfile is NULL:", is.null(importparameters$learningfile), "\n")
-  cat("confirmdatabutton:", importparameters$confirmdatabutton, "\n")
-  
   previousparameters<-NULL
   validation<-NULL
   learning<-NULL
   
-  if(is.null(importparameters$learningfile)&is.null(importparameters$modelfile)){
-    cat("BOTH learningfile and modelfile are NULL, returning NULL\n")
-    return()
-  }
+  if(is.null(importparameters$learningfile)&is.null(importparameters$modelfile)){return()}
   
-  if(!is.null(importparameters$learningfile)){
-    cat(">>> Processing learningfile...\n")
-    datapath<- importparameters$learningfile$datapath
-    cat("datapath:", datapath, "\n")
-    
-    cat(">>> Calling importfile...\n")
-    learning<-importfile(datapath = datapath,
-                         extension = importparameters$extension,
-                         NAstring=importparameters$NAstring,
-                         sheet=importparameters$sheetn,
-                         skiplines=importparameters$skipn,
-                         dec=importparameters$dec,
-                         sep=importparameters$sep)
-    cat("After importfile: learning is NULL =", is.null(learning), "\n")
-    if(!is.null(learning)) cat("After importfile: dim =", dim(learning), "\n")
-    
-    cat(">>> Calling transformdata...\n")
-    learning<-transformdata(toto = learning,
-                            transpose=importparameters$transpose,
-                            zeroegalNA=importparameters$zeroegalNA)
-    cat("After transformdata: learning is NULL =", is.null(learning), "\n")
-    if(!is.null(learning)) cat("After transformdata: dim =", dim(learning), "\n")
-    
-    if(importparameters$confirmdatabutton!=0){
-      cat(">>> Calling confirmdata (button pressed)...\n")
-      cat("Before confirmdata: dim =", dim(learning), "\n")
-      cat("Before confirmdata: class col1 =", class(learning[,1]), "\n")
-      
-      learning<-confirmdata(toto = learning)
-      
-      cat("After confirmdata: learning is NULL =", is.null(learning), "\n")
-      if(!is.null(learning)) {
-        cat("After confirmdata: dim =", dim(learning), "\n")
-        cat("After confirmdata: class col1 =", class(learning[,1]), "\n")
-      } else {
-        cat("!!! confirmdata returned NULL !!!\n")
-      }
-    }
+  if(!is.null(importparameters$modelfile) ){
+    load(file = importparameters$modelfile$datapath)
+    previous<-state
+    learning<-previous$data$LEARNING
+    validation<-previous$data$VALIDATION
+    #lev<-previous$data$LEVELS
+    previousparameters<-previous$parameters
   }
 
-  # if(!is.null(importparameters$validationfile)){
-  #   cat("\n>>> Processing validationfile...\n")
-  #   datapathV<- importparameters$validationfile$datapath
-  #   cat("validation datapath:", datapathV, "\n")
-  #   
-  #   cat(">>> Calling importfile for validation...\n")
-  #   validation<-importfile(datapath = datapathV,
-  #                          extension = importparameters$extension,
-  #                          NAstring=importparameters$NAstring,
-  #                          sheet=importparameters$sheetn,
-  #                          skiplines=importparameters$skipn,
-  #                          dec=importparameters$dec,
-  #                          sep=importparameters$sep)
-  #   cat("After importfile: validation is NULL =", is.null(validation), "\n")
-  #   if(!is.null(validation)) cat("After importfile: dim =", dim(validation), "\n")
-  #   
-  #   cat(">>> Calling transformdata for validation...\n")
-  #   validation<-transformdata(toto = validation,
-  #                             transpose=importparameters$transpose,
-  #                             zeroegalNA=importparameters$zeroegalNA)
-  #   cat("After transformdata: validation is NULL =", is.null(validation), "\n")
-  #   if(!is.null(validation)) cat("After transformdata: dim =", dim(validation), "\n")
-  #   
-  #   if(importparameters$confirmdatabutton!=0){
-  #     cat(">>> Calling confirmdata for validation (button pressed)...\n")
-  #     cat("Before confirmdata: dim =", dim(validation), "\n")
-  #     
-  #     validation<-confirmdata(toto = validation)
-  #     
-  #     cat("After confirmdata: validation is NULL =", is.null(validation), "\n")
-  #     if(!is.null(validation)) {
-  #       cat("After confirmdata: dim =", dim(validation), "\n")
-  #       cat("After confirmdata: class col1 =", class(validation[,1]), "\n")
-  #     } else {
-  #       cat("!!! confirmdata returned NULL for validation !!!\n")
-  #     }
-  #     
-  #     # if(importparameters$invers){
-  #     #   validation[,1]<-factor(validation[,1],levels = rev(levels(validation[,1])))
-  #     # }
-  #   }
-  # } else {
-  #   cat("\n>>> NO VALIDATION FILE uploaded\n")
-  # }
+  if(!is.null(importparameters$learningfile)  ){
+    #if(importparameters$confirmdatabutton==0){
+      datapath<- importparameters$learningfile$datapath
+      #datapath <- input$learningfile$datapath
+      #print(datapath)
+      #print(paste(datapath, ".xlsx", sep=""))
+      #out<<-tryCatch(
+      learning<-importfile(datapath = datapath,extension = importparameters$extension,NAstring=importparameters$NAstring,
+                           sheet=importparameters$sheetn,skiplines=importparameters$skipn,dec=importparameters$dec,sep=importparameters$sep)
+      #              ,error=function(e) e )
+      #            if(any(class(out)=="error")){tablearn<-data.frame()}
+      #            else{tablearn<<-out}
+      #            validate(need(ncol(tablearn)>1 & nrow(tablearn)>1,"problem import"))
+      
+      learning<-transformdata(toto = learning,transpose=importparameters$transpose,zeroegalNA=importparameters$zeroegalNA)
+      
+    #}
+    if(importparameters$confirmdatabutton!=0){
+      learning<-confirmdata(toto = learning)
+      if(importparameters$invers){
+        #learning[,1]<-factor(learning[,1],levels = rev(levels(learning[,1])))
+        }
+      
+      #learning<-learning[-which(apply(X = learning,MARGIN=1,function(x){sum(is.na(x))})==ncol(learning)),]
+      
+#       lev<-levels(x = tablearn[,1])
+#       print(lev)
+#       names(lev)<-c("positif","negatif")
+    }
+    # else{lev<-NULL}
+  }
+
   
-  cat("========== RETURNING FROM IMPORTFUNCTION ==========\n")
-  cat("Final learning is NULL:", is.null(learning), "\n")
-  cat("Final validation is NULL:", is.null(validation), "\n") 
-  
-  res<-list("learning"=learning,"validation"=validation,previousparameters=previousparameters)
+  if(!is.null(importparameters$validationfile)  ){
+    
+    # if(importparameters$confirmdatabutton==0){
+      datapathV<- importparameters$validationfile$datapath
+      # out<<-tryCatch(
+      validation<-importfile(datapath = datapathV,extension = importparameters$extension,
+                 NAstring=importparameters$NAstring,sheet=importparameters$sheetn,skiplines=importparameters$skipn,dec=importparameters$dec,sep=importparameters$sep)
+      #             ,error=function(e) e)
+      #             if(any(class(out)=="error")){tabval<-NULL}
+      #            else{tabval<<-out}
+      #            validate(need(ncol(tabval)>1 & nrow(tabval)>1,"problem import"))
+        validation<-transformdata(toto = validation,transpose=importparameters$transpose,zeroegalNA=importparameters$zeroegalNA)
+      
+      
+    # }
+    if(importparameters$confirmdatabutton!=0){
+      validation<-confirmdata(toto = validation)
+      if(importparameters$invers){validation[,1]<-factor(validation[,1],levels = rev(levels(validation[,1])))}
+      
+      #validation<-validation[-which(apply(X = validation,MARGIN=1,function(x){sum(is.na(x))})==ncol(validation)),]
+        
+    }
+    
+  }
+
+  res<-list("learning"=learning,"validation"=validation,previousparameters=previousparameters)#,"lev"=lev)
   return(res)
 }
 
