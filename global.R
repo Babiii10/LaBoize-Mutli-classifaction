@@ -1979,7 +1979,7 @@ modelfunction <- function(learningmodel,
       
       # Multi-class classification - use probabilities (works for 2+ classes)
       # SVM with probability=TRUE returns probability matrix
-      pred_probs <- attr(predict(model, learningmodel[,-1], probability=TRUE), "probabilities")
+      pred_probs <- attr(e1071:::predict.svm(model, learningmodel[,-1], probability=TRUE), "probabilities")
       scorelearning <- pred_probs  # Matrix (n_samples × n_classes)
       
       # Reorder columns to match level order
@@ -2077,7 +2077,7 @@ modelfunction <- function(learningmodel,
       }
       
       # Make predictions (probabilities) - multi-class (works for 2+ classes)
-      predictions_raw <- predict(model, x)
+      predictions_raw <- xgboost:::predict.xgb.Booster(model, x)
       # Multi-class: predictions_raw is a matrix (n_samples × n_classes)
       scorelearning <- matrix(predictions_raw, ncol=n_classes, byrow=TRUE)
       colnames(scorelearning) <- lev
@@ -3091,7 +3091,7 @@ testmodel<-function(model,modeltype,tab,validation,criterionimportance,criterion
     if(criterionmodel=="auc"){
       if (fstype=='learn'){
         # Multi-class AUC for SVM (with probability=TRUE)
-        pred_probs <- attr(predict(model, tab[,-1], probability=TRUE), "probabilities")
+        pred_probs <- attr(e1071:::predict.svm(model, tab[,-1], probability=TRUE), "probabilities")
         lev <- levels(tab[,1])
         pred_probs <- pred_probs[, lev]  # Reorder columns
         auc_results <- calculate_multiclass_auc(tab[,1], pred_probs)
@@ -3116,7 +3116,7 @@ testmodel<-function(model,modeltype,tab,validation,criterionimportance,criterion
         test[i]<-bermod-BER(class = tabdiff2[,1],classpredict = resmodeldiff$fitted)}
       if(criterionmodel=="auc"){
         # Multi-class AUC for comparison model
-        pred_probs_diff <- attr(predict(resmodeldiff, tabdiff2[,-1], probability=TRUE), "probabilities")
+        pred_probs_diff <- attr(e1071:::predict.svm(resmodeldiff, tabdiff2[,-1], probability=TRUE), "probabilities")
         lev <- levels(tabdiff2[,1])
         pred_probs_diff <- pred_probs_diff[, lev]
         auc_results_diff <- calculate_multiclass_auc(tabdiff2[,1], pred_probs_diff)
