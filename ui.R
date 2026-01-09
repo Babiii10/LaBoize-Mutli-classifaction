@@ -105,14 +105,25 @@ shinyUI(fluidPage(
         conditionalPanel(condition ="input.confirmdatabutton!=0",
                          hr(),
                          fluidRow(
-                           column(12,
-                                  h4("Classes in dataset:"),
-                                  textOutput("class_summary"),
-                                  tags$head(tags$style("#class_summary{color: #007bff;font-size: 16px;font-weight: bold;}")),
-                                  br(),
-                                  uiOutput("class_count_indicator"),
-                                  tags$head(tags$style("#class_count_indicator{color: #28a745;font-size: 15px;font-weight: bold;background-color: #f0f9ff;padding: 8px;border-radius: 5px;border-left: 4px solid #28a745;}"))
+                             column(1,
+                                   shinyjs::disabled(
+                                     checkboxInput("invers", " " , value = FALSE)
+                                   )
+                                  ),
+                           column(11,
+                                  h4("Classes in learning dataset:"),
+                                  textOutput("positif",inline=T)
+                                  # p(textOutput("positif",inline=T),HTML( '&#x21D2;'), "case ",br(),
+                                  #   textOutput("negatif",inline=T),HTML( '&#x21D2;'), "control",align="center")
                            )
+                           # column(12,
+                           #        h4("Classes in dataset:"),
+                           #        textOutput("class_summary"),
+                           #        tags$head(tags$style("#class_summary{color: #007bff;font-size: 16px;font-weight: bold;}")),
+                           #        br(),
+                           #        uiOutput("class_count_indicator"),
+                           #        tags$head(tags$style("#class_count_indicator{color: #28a745;font-size: 15px;font-weight: bold;background-color: #f0f9ff;padding: 8px;border-radius: 5px;border-left: 4px solid #28a745;}"))
+                           # )
                          ),
                          hr(),
                          radioButtons("paramdownplot","Download images as",choices=list("png"="png","jpg"="jpg","pdf"="pdf"),selected="png"),
