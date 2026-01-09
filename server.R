@@ -41,6 +41,11 @@ shinyServer(function(input, output,session) {
     return(!is.null(input$learningfile))
   })
   outputOptions(output, 'fileUploaded', suspendWhenHidden=FALSE)
+
+  output$positif<-renderText({
+      res<-levels(DATA()$LEARNING[,1]) #[1]
+      paste(res, collapse = ", ")
+   })
   
   output$image1<-renderImage({return (list(src="pictures/Logo I2MC.jpg", 
                                            contentType="image/jpeg",
